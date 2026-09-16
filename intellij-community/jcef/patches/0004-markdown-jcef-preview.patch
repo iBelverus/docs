@@ -1,0 +1,1439 @@
+# JCEF/CEF changes: Markdown JCEF preview fixes
+# Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
+# Apply with: git apply 0004-markdown-jcef-preview.patch
+#
+#   06c2304250ab7de0ebf3ca739f375f3ffa205e66 2026-04-07 Ekaterina Berezhko | [Markdown][IJPL-91133] Fix OSR scroll speed by accounting for scrollAmount in wheel rotation
+#   a3e9217e378ecc775029d33aab14ea4cd2a84fdf 2026-04-14 Ekaterina Berezhko | [Markdown][IJPL-236346] Fix Markdown HTML export losing styles after jsoup 1.21.2 upgrade
+#   f8b412146908244d1ff64d7f7948a38e463ed384 2026-04-15 Ekaterina Berezhko | [Markdown][IJPL-91133] Fix JCEF OSR mouse wheel scroll speed
+#   87fba5d1433454cb374b86dc93e8e0f9cd525dfd 2026-04-27 Ilia Permiashkin | [markdown] IJPL-171896 Markdown preview doesn't render images from outside the project
+#   50a115416c68587cf47d0076ac5848166bef0eb9 2026-04-30 Ilia Permiashkin | [markdown] IJPL-171896 Support all types of path variants
+#   b2b4aefe867ce1d3517447aea8dedff099ca2f8e 2026-05-05 Maxime Kudrinski | IJPL-92401 [markdown] run commands with project's root directory
+#   9c71c714f53c0a289983b75d4ad33f442da7fa82 2026-05-13 Ilia Permiashkin | [markdown] IJPL-243436 Add gutter run configuration for runnable JVM classes
+#   63eebf03539f734b76d4b3282dc943ff2788a385 2026-06-03 Ekaterina Berezhko | [Markdown][IJPL-245222] Add session-based hashing and prevent `data-command` link propagation
+#   8a5f6071a1599fd29adbbbd936220b2d90734766 2026-07-21 Ekaterina Berezhko | [IJPL-245222][Markdown] Update clickjacking checks and command confirmation logic in Markdown preview
+#   e2a6d9082df263b65bd92f5a4f24bc63a709307e 2026-08-03 Ilia Permiashkin | [markdown] IJPL-250785 Markdown editor: High CPU from run-configuration lookups per code span
+#   caef43e423f00a4398f25d5f6de09db0abde499c 2026-08-17 Ekaterina Berezhko | [Markdown][IJPL-251259] Adapt scrollbar styling to IDE scale
+#
+diff --git a/platform/ui.jcef/jcef/JBCefOsrComponent.java b/platform/ui.jcef/jcef/JBCefOsrComponent.java
+index 137f15ddba0d..50b531b34099 100644
+--- a/platform/ui.jcef/jcef/JBCefOsrComponent.java
++++ b/platform/ui.jcef/jcef/JBCefOsrComponent.java
+@@ -225,7 +225,11 @@ class JBCefOsrComponent extends JPanel {
+                                                  CefTouchEvent.PointerType.UNKNOWN));
+     }
+     else {
+-      double val = e.getPreciseWheelRotation() * WHEEL_ROTATION_FACTOR;
++      // On Windows, scrollType is WHEEL_UNIT_SCROLL with scrollAmount=3 (OS lines-per-notch),
++      // while on Mac trackpads use continuous precision events with scrollAmount=1.
++      // Multiplying by scrollAmount matches Swing's getUnitsToScroll() behavior.
++      int scrollAmount = e.getScrollType() == MouseWheelEvent.WHEEL_UNIT_SCROLL ? e.getScrollAmount() : 1;
++      double val = e.getPreciseWheelRotation() * scrollAmount * WHEEL_ROTATION_FACTOR;
+       if (SystemInfoRt.isLinux || SystemInfoRt.isMac) {
+         val *= -1;
+       }
+diff --git a/platform/util/resources/misc/registry.properties b/platform/util/resources/misc/registry.properties
+index 07945f0219d1..254a6cf51ed9 100644
+--- a/platform/util/resources/misc/registry.properties
++++ b/platform/util/resources/misc/registry.properties
+@@ -421,7 +421,7 @@ ide.browser.jcef.osr.enabled=true
+ ide.browser.jcef.osr.enabled.restartRequired=true
+ ide.browser.jcef.osr.enabled.description=Enable per-browser off-screen rendering mode for JCEF
+ ide.browser.jcef.osr.wheelRotation.factor=10
+-ide.browser.jcef.osr.wheelRotation.factor.description=The factor to multiply MouseWheelEvent.getWheelRotation() in a buffered OSR browser.
++ide.browser.jcef.osr.wheelRotation.factor.description=The factor to multiply (MouseWheelEvent.getWheelRotation() * scrollAmount) in a buffered OSR browser.
+ ide.browser.jcef.osr.measureFPS.id=OSR JCEF FPS Meter
+ ide.browser.jcef.osr.measureFPS.id.description=JCEF OSR browser FPS Meter string ID.
+ ide.browser.jcef.osr.measureFPS.scroll=false
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/HtmlExporter.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/HtmlExporter.kt
+index 44c73f64bbfc..e6b7294aa100 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/HtmlExporter.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/HtmlExporter.kt
+@@ -74,16 +74,11 @@ internal class HtmlExporter(
+ 
+   private fun appendInlineStylesContent(styles: Elements) {
+     val inlinedStyles = styles.mapNotNull {
+-      val content = getStyleContent(it) ?: return@mapNotNull null
++      val content = getStyleContent(it)?.takeUnless { c -> c.isBlank() } ?: return@mapNotNull null
+       Element("style").text(content)
+     }
+     styles.remove()
+-
+-    inlinedStyles.forEach {
+-      if (it.hasText()) {
+-        document.head().appendChild(it)
+-      }
+-    }
++    inlinedStyles.forEach { document.head().appendChild(it) }
+   }
+ 
+   private fun getStyleContent(linkElement: Element): String? {
+diff --git a/platform/ui.jcef/jcef/JBCefOsrComponent.java b/platform/ui.jcef/jcef/JBCefOsrComponent.java
+index 50b531b34099..c69859c24ea7 100644
+--- a/platform/ui.jcef/jcef/JBCefOsrComponent.java
++++ b/platform/ui.jcef/jcef/JBCefOsrComponent.java
+@@ -225,11 +225,7 @@ class JBCefOsrComponent extends JPanel {
+                                                  CefTouchEvent.PointerType.UNKNOWN));
+     }
+     else {
+-      // On Windows, scrollType is WHEEL_UNIT_SCROLL with scrollAmount=3 (OS lines-per-notch),
+-      // while on Mac trackpads use continuous precision events with scrollAmount=1.
+-      // Multiplying by scrollAmount matches Swing's getUnitsToScroll() behavior.
+-      int scrollAmount = e.getScrollType() == MouseWheelEvent.WHEEL_UNIT_SCROLL ? e.getScrollAmount() : 1;
+-      double val = e.getPreciseWheelRotation() * scrollAmount * WHEEL_ROTATION_FACTOR;
++      double val = e.getPreciseWheelRotation() * WHEEL_ROTATION_FACTOR;
+       if (SystemInfoRt.isLinux || SystemInfoRt.isMac) {
+         val *= -1;
+       }
+@@ -245,8 +241,8 @@ class JBCefOsrComponent extends JPanel {
+         e.getClickCount(),
+         e.isPopupTrigger(),
+         e.getScrollType(),
+-        e.getScrollAmount(),
+-        (int)val,
++        e.getScrollType() == MouseWheelEvent.WHEEL_UNIT_SCROLL ? e.getScrollAmount() : 1,
++        (int)Math.round(val),
+         val));
+     }
+   }
+diff --git a/platform/util/resources/misc/registry.properties b/platform/util/resources/misc/registry.properties
+index 254a6cf51ed9..09966bbdea0a 100644
+--- a/platform/util/resources/misc/registry.properties
++++ b/platform/util/resources/misc/registry.properties
+@@ -420,8 +420,8 @@ ide.browser.jcef.enabled.description=Use the JCEF browser to render html/js cont
+ ide.browser.jcef.osr.enabled=true
+ ide.browser.jcef.osr.enabled.restartRequired=true
+ ide.browser.jcef.osr.enabled.description=Enable per-browser off-screen rendering mode for JCEF
+-ide.browser.jcef.osr.wheelRotation.factor=10
+-ide.browser.jcef.osr.wheelRotation.factor.description=The factor to multiply (MouseWheelEvent.getWheelRotation() * scrollAmount) in a buffered OSR browser.
++ide.browser.jcef.osr.wheelRotation.factor=40
++ide.browser.jcef.osr.wheelRotation.factor.description=The factor to multiply MouseWheelEvent.getWheelRotation() in a buffered OSR browser.
+ ide.browser.jcef.osr.measureFPS.id=OSR JCEF FPS Meter
+ ide.browser.jcef.osr.measureFPS.id.description=JCEF OSR browser FPS Meter string ID.
+ ide.browser.jcef.osr.measureFPS.scroll=false
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
+index 5411fd184454..0aa896b53e29 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
+@@ -1,11 +1,12 @@
+ // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+ package org.intellij.plugins.markdown.ui.preview.jcef.impl
+ 
+-import com.intellij.openapi.vfs.VfsUtil
+ import com.intellij.openapi.vfs.VirtualFile
++import com.intellij.openapi.vfs.VirtualFileManager
++import com.intellij.openapi.vfs.toNioPathOrNull
+ import org.intellij.plugins.markdown.ui.preview.ResourceProvider
+-import java.io.File
+-import java.net.URL
++import java.nio.file.Files
++import java.nio.file.Path
+ 
+ internal class FileSchemeResourcesProcessor(
+   private val baseFile: VirtualFile?,
+@@ -16,11 +17,20 @@ internal class FileSchemeResourcesProcessor(
+   }
+ 
+   override fun loadResource(resourceName: String): ResourceProvider.Resource? {
+-    val resource = if (resourceName.startsWith("file:/")) {
+-      VfsUtil.findFileByIoFile(File(URL(resourceName).path), true)
+-    } else {
+-      projectRoot?.findFileByRelativePath(resourceName)
+-    } ?: return null
+-    return ResourceProvider.loadExternalResource(resource)
++    val resourcePath = Path.of(resourceName)
++    if (isChildOfProjectRoot(resourcePath)) {
++      val resource = VirtualFileManager.getInstance().refreshAndFindFileByNioPath(resourcePath) ?: return null
++      return ResourceProvider.loadExternalResource(resource)
++    }
++
++    return runCatching {
++      if (!Files.isRegularFile(resourcePath)) return null
++      Files.newInputStream(resourcePath).use { ResourceProvider.Resource(it.readBytes()) }
++    }.getOrNull()
++  }
++
++  private fun isChildOfProjectRoot(resourcePath: Path): Boolean {
++    val projectPath = projectRoot?.toNioPathOrNull() ?: return false
++    return resourcePath.startsWith(projectPath)
+   }
+ }
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
+index 7df415ba5314..2282b636aca5 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
+@@ -1,6 +1,7 @@
+ // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+ package org.intellij.plugins.markdown.ui.preview.jcef.impl
+ 
++import com.intellij.ide.trustedProjects.TrustedProjects.isProjectTrusted
+ import com.intellij.openapi.diagnostic.thisLogger
+ import com.intellij.openapi.progress.ProgressManager
+ import com.intellij.openapi.util.SystemInfo
+@@ -8,6 +9,7 @@ import com.intellij.openapi.util.io.FileUtil
+ import com.intellij.openapi.util.text.StringUtil
+ import com.intellij.openapi.vfs.VfsUtilCore
+ import com.intellij.openapi.vfs.VirtualFile
++import com.intellij.openapi.vfs.toNioPathOrNull
+ import org.intellij.plugins.markdown.ui.preview.PreviewStaticServer
+ import org.intellij.plugins.markdown.ui.preview.ResourceProvider
+ import org.intellij.plugins.markdown.ui.preview.html.PreviewEncodingUtil
+@@ -21,8 +23,10 @@ import org.jsoup.nodes.TextNode
+ import org.jsoup.parser.Parser
+ import org.jsoup.parser.Tag
+ import org.jsoup.parser.TagSet
++import java.net.URI
+ import java.net.URLDecoder
+ import java.nio.charset.Charset
++import java.nio.file.Path
+ 
+ @ApiStatus.Internal
+ class IncrementalDOMBuilder(
+@@ -119,6 +123,9 @@ class IncrementalDOMBuilder(
+   }
+ 
+   private fun actuallyProcessImageNode(node: Node, baseFile: VirtualFile, projectRoot: VirtualFile) {
++    val fileSchemeResourceProcessor = fileSchemeResourceProcessor ?: return
++    val projectPath = projectRoot.toNioPathOrNull() ?: return
++
+     var path = node.attr("src")
+     val hasFileHost = path.startsWith("file:/")
+     if (hasFileHost && !node.hasAttr("from-extension")) {
+@@ -138,11 +145,15 @@ class IncrementalDOMBuilder(
+       }
+       path = FileUtil.toSystemIndependentName(path)
+     }
+-    if (fileSchemeResourceProcessor != null) {
+-      val processed = PreviewStaticServer.getStaticUrl(fileSchemeResourceProcessor, path)
+-      node.attr("data-original-src", path)
+-      node.attr("src", processed)
+-    }
++
++    val filePath = if (hasFileHost) Path.of(URI(path))
++    else baseFile.toNioPath().resolve(path).normalize()
++
++    if (!hasFileHost && !isProjectTrusted(projectPath) && !filePath.startsWith(projectPath)) return
++
++    val processed = PreviewStaticServer.getStaticUrl(fileSchemeResourceProcessor, filePath.toString())
++    node.attr("data-original-src", path)
++    node.attr("src", processed)
+   }
+ 
+   private fun shouldPreprocessImageNode(node: Node): Boolean {
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
+index 0aa896b53e29..ed1842e4e49b 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
+@@ -25,7 +25,7 @@ internal class FileSchemeResourcesProcessor(
+ 
+     return runCatching {
+       if (!Files.isRegularFile(resourcePath)) return null
+-      Files.newInputStream(resourcePath).use { ResourceProvider.Resource(it.readBytes()) }
++      ResourceProvider.loadExternalResource(resourcePath)
+     }.getOrNull()
+   }
+ 
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
+index 2282b636aca5..ee89c1e5a50c 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
+@@ -7,7 +7,6 @@ import com.intellij.openapi.progress.ProgressManager
+ import com.intellij.openapi.util.SystemInfo
+ import com.intellij.openapi.util.io.FileUtil
+ import com.intellij.openapi.util.text.StringUtil
+-import com.intellij.openapi.vfs.VfsUtilCore
+ import com.intellij.openapi.vfs.VirtualFile
+ import com.intellij.openapi.vfs.toNioPathOrNull
+ import org.intellij.plugins.markdown.ui.preview.PreviewStaticServer
+@@ -23,10 +22,8 @@ import org.jsoup.nodes.TextNode
+ import org.jsoup.parser.Parser
+ import org.jsoup.parser.Tag
+ import org.jsoup.parser.TagSet
+-import java.net.URI
+ import java.net.URLDecoder
+ import java.nio.charset.Charset
+-import java.nio.file.Path
+ 
+ @ApiStatus.Internal
+ class IncrementalDOMBuilder(
+@@ -136,26 +133,29 @@ class IncrementalDOMBuilder(
+       if (SystemInfo.isWindows) {
+         path = StringUtil.replace(path, "\\", "/")
+       }
++
+       if (!path.startsWith('/')) {
+-        val resolved = baseFile.findFileByRelativePath(path) ?: return
+-        path = VfsUtilCore.getRelativePath(resolved, projectRoot) ?: path
+-      }
+-      if (SystemInfo.isWindows && path.startsWith("/")) {
+-        path = path.trimStart('/')
++        path = findRelativePath(baseFile, path) ?: return
++      } else {
++        if (SystemInfo.isWindows) {
++          path = path.trimStart('/')
++        }
++        path = findRelativePath(projectRoot, path) ?: path
+       }
+       path = FileUtil.toSystemIndependentName(path)
+     }
+ 
+-    val filePath = if (hasFileHost) Path.of(URI(path))
+-    else baseFile.toNioPath().resolve(path).normalize()
++    if (!hasFileHost && !isProjectTrusted(projectPath) && !path.startsWith(projectPath.toString())) return
+ 
+-    if (!hasFileHost && !isProjectTrusted(projectPath) && !filePath.startsWith(projectPath)) return
+-
+-    val processed = PreviewStaticServer.getStaticUrl(fileSchemeResourceProcessor, filePath.toString())
++    val processed = PreviewStaticServer.getStaticUrl(fileSchemeResourceProcessor, path)
+     node.attr("data-original-src", path)
+     node.attr("src", processed)
+   }
+ 
++  private fun findRelativePath(baseFile: VirtualFile, relPath: String): String? {
++    return baseFile.findFileByRelativePath(relPath)?.toNioPathOrNull()?.normalize()?.toString()
++  }
++
+   private fun shouldPreprocessImageNode(node: Node): Boolean {
+     return node.nodeName() == "img" && !node.hasAttr(IntelliJImageGeneratingProvider.ignorePathProcessingAttributeName)
+   }
+diff --git a/plugins/markdown/core/resources/META-INF/plugin.xml b/plugins/markdown/core/resources/META-INF/plugin.xml
+index 3feb774c815a..71ea988865fa 100644
+--- a/plugins/markdown/core/resources/META-INF/plugin.xml
++++ b/plugins/markdown/core/resources/META-INF/plugin.xml
+@@ -380,6 +380,9 @@
+     <registryKey key="markdown.experimental.allow.external.requests"
+                  defaultValue="true"
+                  description="Enables requests for external resources from the preview (e.g. non-local images)."/>
++    <registryKey key="markdown.command.runner.use.file.directory"
++                 defaultValue="false"
++                 description="Use the markdown file's parent directory as the working directory when running commands. Defaults to project root."/>
+     <!--endregion-->
+ 
+     <advancedSetting id="markdown.hide.floating.toolbar" default="false" groupKey="markdown.settings.name"/>
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
+index 0638078c4ee1..6e7bb86374b5 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
+@@ -25,8 +25,11 @@ import com.intellij.openapi.application.runReadAction
+ import com.intellij.openapi.diagnostic.ControlFlowException
+ import com.intellij.openapi.diagnostic.logger
+ import com.intellij.openapi.project.Project
++import com.intellij.openapi.project.BaseProjectDirectories
+ import com.intellij.openapi.util.Disposer
++import com.intellij.openapi.util.registry.Registry
+ import com.intellij.openapi.vfs.LocalFileSystem
++import org.jetbrains.annotations.ApiStatus
+ import com.intellij.openapi.vfs.VirtualFile
+ import com.intellij.ui.AppUIUtil
+ import org.intellij.plugins.markdown.MarkdownBundle
+@@ -108,8 +111,8 @@ internal class CommandRunnerExtension(
+     try {
+       val project = panel.project
+       val file = panel.virtualFile
+-      if (project != null && file != null && file.parent != null
+-          && matches(project, file.parent.canonicalPath, true, rawCodeLine.trim(), allowRunConfigurations)
++      if (project != null && file != null
++          && matches(project, getMarkdownCommandWorkingDirectory(project, file), true, rawCodeLine.trim(), allowRunConfigurations)
+       ) {
+         val hash = MarkdownUtil.md5(rawCodeLine, "")
+         hash2Cmd[hash] = rawCodeLine
+@@ -183,7 +186,7 @@ internal class CommandRunnerExtension(
+     val project = panel.project
+     val virtualFile = panel.virtualFile
+     if (project != null && virtualFile != null) {
+-      execute(project, virtualFile.parent.canonicalPath, true, command, executor, RunnerPlace.PREVIEW)
++      execute(project, getMarkdownCommandWorkingDirectory(project, virtualFile), true, command, executor, RunnerPlace.PREVIEW)
+     }
+   }
+ 
+@@ -196,7 +199,7 @@ internal class CommandRunnerExtension(
+       TrustedProjectUtil.executeIfTrusted(project) {
+         RUNNER_EXECUTED.log(project,  RunnerPlace.PREVIEW, RunnerType.BLOCK, runner.javaClass)
+         invokeLater {
+-          runner.run(command, project, virtualFile.parent.canonicalPath, executor)
++          runner.run(command, project, getMarkdownCommandWorkingDirectory(project, virtualFile), executor)
+         }
+       }
+     }
+@@ -366,4 +369,15 @@ enum class RunnerPlace {
+ 
+ enum class RunnerType {
+   BLOCK, LINE
++}
++
++@ApiStatus.Internal
++fun getMarkdownCommandWorkingDirectory(project: Project, virtualFile: VirtualFile?): String? {
++  return if (Registry.`is`("markdown.command.runner.use.file.directory")) {
++    virtualFile?.parent?.canonicalPath
++  }
++  else {
++    virtualFile?.let { BaseProjectDirectories.getInstance(project).getBaseDirectoryFor(it) }?.canonicalPath
++    ?: virtualFile?.parent?.canonicalPath
++  }
+ }
+\ No newline at end of file
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
+index 64d5abea4dbc..79458130ae53 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
+@@ -42,7 +42,7 @@ internal class MarkdownRunLineMarkersProvider: RunLineMarkerContributor(), DumbA
+       return null
+     }
+ 
+-    val dir = element.containingFile.virtualFile.parent?.path ?: return null
++    val dir = getMarkdownCommandWorkingDirectory(element.project, element.containingFile.virtualFile) ?: return null
+     val text = getText(element)
+     if (!matches(element.project, dir, true, text, allowRunConfigurations = inCodeSpan)) {
+       return null
+@@ -66,7 +66,7 @@ internal class MarkdownRunLineMarkersProvider: RunLineMarkerContributor(), DumbA
+     val language = CodeFenceLanguageGuesser.guessLanguageForInjection(lang)
+     val runner = MarkdownRunner.EP_NAME.extensionList.firstOrNull { it.isApplicable(language) } ?: return null
+     val text = (element.parent as? MarkdownCodeFence)?.let(this::collectFenceText) ?: return null
+-    val dir = element.containingFile.virtualFile.parent?.path ?: return null
++    val dir = getMarkdownCommandWorkingDirectory(element.project, element.containingFile.virtualFile) ?: return null
+     val runAction = object : AnAction({ runner.title() }, AllIcons.RunConfigurations.TestState.Run_run) {
+       override fun actionPerformed(event: AnActionEvent) {
+         val project = event.getData(CommonDataKeys.PROJECT) ?: return
+diff --git a/plugins/markdown/test/BUILD.bazel b/plugins/markdown/test/BUILD.bazel
+index 5141ffa1217d..f64d9f0a0b00 100644
+--- a/plugins/markdown/test/BUILD.bazel
++++ b/plugins/markdown/test/BUILD.bazel
+@@ -161,6 +161,8 @@ jvm_library(
+     "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable_test_lib",
+     "//platform/lang-core",
+     "//platform/lang-core:lang-core_test_lib",
++    "//platform/execution",
++    "//platform/execution:execution_test_lib",
+   ],
+   runtime_deps = [
+     ":tests",
+diff --git a/plugins/markdown/test/intellij.markdown.tests.iml b/plugins/markdown/test/intellij.markdown.tests.iml
+index 86208cc9329d..37f35a157ac7 100644
+--- a/plugins/markdown/test/intellij.markdown.tests.iml
++++ b/plugins/markdown/test/intellij.markdown.tests.iml
+@@ -63,5 +63,6 @@
+     <orderEntry type="module" module-name="intellij.platform.structureView.impl" scope="TEST" />
+     <orderEntry type="module" module-name="intellij.libraries.kotlinx.collections.immutable" />
+     <orderEntry type="module" module-name="intellij.platform.lang.core" />
++    <orderEntry type="module" module-name="intellij.platform.execution" scope="TEST" />
+   </component>
+ </module>
+\ No newline at end of file
+diff --git a/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCommandRunnerLineMarkersTest.kt b/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCommandRunnerLineMarkersTest.kt
+new file mode 100644
+index 000000000000..77a3726b3b62
+--- /dev/null
++++ b/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCommandRunnerLineMarkersTest.kt
+@@ -0,0 +1,81 @@
++// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
++package org.intellij.plugins.markdown.extensions
++
++import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl
++import com.intellij.execution.Executor
++import com.intellij.icons.AllIcons
++import com.intellij.lang.Language
++import com.intellij.openapi.actionSystem.ActionPlaces
++import com.intellij.openapi.actionSystem.ActionUiKind
++import com.intellij.openapi.actionSystem.AnActionEvent
++import com.intellij.openapi.actionSystem.CommonDataKeys
++import com.intellij.openapi.actionSystem.impl.SimpleDataContext
++import com.intellij.openapi.editor.markup.GutterIconRenderer
++import com.intellij.openapi.project.BaseProjectDirectories
++import com.intellij.openapi.extensions.ExtensionPointName
++import com.intellij.openapi.project.Project
++import com.intellij.openapi.util.registry.Registry
++import com.intellij.testFramework.ExtensionTestUtil
++import com.intellij.testFramework.fixtures.BasePlatformTestCase
++import org.intellij.plugins.markdown.extensions.jcef.commandRunner.MarkdownRunner
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.junit.runners.JUnit4
++
++@RunWith(JUnit4::class)
++class MarkdownCommandRunnerLineMarkersTest : BasePlatformTestCase() {
++
++  private val markdownRunnerEp = ExtensionPointName.create<MarkdownRunner>("org.intellij.markdown.markdownRunner")
++  private val capturingRunner = CapturingRunner()
++
++  override fun setUp() {
++    super.setUp()
++    ExtensionTestUtil.maskExtensions(markdownRunnerEp, listOf(capturingRunner), testRootDisposable)
++    val testMdFile = myFixture.addFileToProject("foo/test.md", "```shell\npwd\n```")
++    myFixture.openFileInEditor(testMdFile.virtualFile)
++  }
++
++  @Test
++  fun `block run marker is shown for shell code fence`() {
++    myFixture.doHighlighting()
++    val markers = DaemonCodeAnalyzerImpl.getLineMarkers(myFixture.editor.document, project)
++    assertNotNull(markers.firstOrNull { it.icon == AllIcons.RunConfigurations.TestState.Run_run })
++  }
++
++  @Test
++  fun `block run marker invokes runner with base directory as working directory`() {
++    fireBlockMarkerAction()
++    val expected = BaseProjectDirectories.getInstance(project).getBaseDirectoryFor(myFixture.file.virtualFile)?.canonicalPath
++    assertEquals(expected, capturingRunner.capturedDir)
++  }
++
++  @Test
++  fun `block run marker invokes runner with file directory as working directory when registry key is enabled`() {
++    Registry.get("markdown.command.runner.use.file.directory").setValue(true, testRootDisposable)
++    fireBlockMarkerAction()
++    assertEquals(myFixture.file.virtualFile.parent.canonicalPath, capturingRunner.capturedDir)
++  }
++
++  private fun fireBlockMarkerAction() {
++    myFixture.doHighlighting()
++    val markers = DaemonCodeAnalyzerImpl.getLineMarkers(myFixture.editor.document, project)
++    val blockMarker = markers.first { it.icon == AllIcons.RunConfigurations.TestState.Run_run }
++    val action = (blockMarker.createGutterRenderer() as GutterIconRenderer).clickAction!!
++    val dataContext = SimpleDataContext.builder().add(CommonDataKeys.PROJECT, project).build()
++    val event = AnActionEvent.createEvent(dataContext, action.templatePresentation.clone(), ActionPlaces.EDITOR_GUTTER, ActionUiKind.NONE, null)
++    action.actionPerformed(event)
++  }
++
++  private class CapturingRunner : MarkdownRunner {
++    var capturedDir: String? = "not-captured"
++
++    override fun isApplicable(language: Language?) = true
++
++    override fun run(command: String, project: Project, workingDirectory: String?, executor: Executor): Boolean {
++      capturedDir = workingDirectory
++      return true
++    }
++
++    override fun title() = "Test Runner"
++  }
++}
+diff --git a/.idea/modules.xml b/.idea/modules.xml
+index 5ab080706e91..44b923cb1098 100644
+--- a/.idea/modules.xml
++++ b/.idea/modules.xml
+@@ -1157,6 +1157,7 @@
+       <module fileurl="file://$PROJECT_DIR$/plugins/markdown/frontmatter/toml/intellij.markdown.frontmatter.toml.iml" filepath="$PROJECT_DIR$/plugins/markdown/frontmatter/toml/intellij.markdown.frontmatter.toml.iml" />
+       <module fileurl="file://$PROJECT_DIR$/plugins/markdown/frontmatter/yaml/intellij.markdown.frontmatter.yaml.iml" filepath="$PROJECT_DIR$/plugins/markdown/frontmatter/yaml/intellij.markdown.frontmatter.yaml.iml" />
+       <module fileurl="file://$PROJECT_DIR$/plugins/markdown/images/intellij.markdown.images.iml" filepath="$PROJECT_DIR$/plugins/markdown/images/intellij.markdown.images.iml" />
++      <module fileurl="file://$PROJECT_DIR$/plugins/markdown/java/intellij.markdown.java.iml" filepath="$PROJECT_DIR$/plugins/markdown/java/intellij.markdown.java.iml" />
+       <module fileurl="file://$PROJECT_DIR$/plugins/markdown/model/intellij.markdown.model.iml" filepath="$PROJECT_DIR$/plugins/markdown/model/intellij.markdown.model.iml" />
+       <module fileurl="file://$PROJECT_DIR$/plugins/markdown/plugin/intellij.markdown.plugin.main.iml" filepath="$PROJECT_DIR$/plugins/markdown/plugin/intellij.markdown.plugin.main.iml" />
+       <module fileurl="file://$PROJECT_DIR$/plugins/markdown/spellchecker/intellij.markdown.spellchecker.iml" filepath="$PROJECT_DIR$/plugins/markdown/spellchecker/intellij.markdown.spellchecker.iml" />
+diff --git a/build/bazel-generated-file-list.txt b/build/bazel-generated-file-list.txt
+index cb690ba5addf..22902dfe41ae 100644
+--- a/build/bazel-generated-file-list.txt
++++ b/build/bazel-generated-file-list.txt
+@@ -1455,6 +1455,7 @@ plugins/markdown/frontmatter
+ plugins/markdown/frontmatter/toml
+ plugins/markdown/frontmatter/yaml
+ plugins/markdown/images
++plugins/markdown/java
+ plugins/markdown/model
+ plugins/markdown/plugin
+ plugins/markdown/spellchecker
+diff --git a/plugins/markdown/core/plugin-content.yaml b/plugins/markdown/core/plugin-content.yaml
+index 12c75e972cf5..44c2dc9ecc23 100644
+--- a/plugins/markdown/core/plugin-content.yaml
++++ b/plugins/markdown/core/plugin-content.yaml
+@@ -20,4 +20,7 @@
+   - name: intellij.markdown.frontend
+ - name: lib/modules/intellij.markdown.frontend.split.jar
+   contentModules:
+-  - name: intellij.markdown.frontend.split
+\ No newline at end of file
++  - name: intellij.markdown.frontend.split
++- name: lib/modules/intellij.markdown.java.jar
++  contentModules:
++  - name: intellij.markdown.java
+\ No newline at end of file
+diff --git a/plugins/markdown/core/resources/META-INF/plugin.xml b/plugins/markdown/core/resources/META-INF/plugin.xml
+index 44c6a6033406..63e11a09379a 100644
+--- a/plugins/markdown/core/resources/META-INF/plugin.xml
++++ b/plugins/markdown/core/resources/META-INF/plugin.xml
+@@ -23,6 +23,7 @@
+     <module name="intellij.markdown.frontend"/>
+     <module name="intellij.markdown.frontend.split"/>
+     <module name="intellij.markdown.backend"/>
++    <module name="intellij.markdown.java"/>
+   </content>
+ 
+   <description><![CDATA[
+@@ -61,6 +62,9 @@
+     <extensionPoint qualifiedName="org.intellij.markdown.markdownRunner"
+                     interface="org.intellij.plugins.markdown.extensions.jcef.commandRunner.MarkdownRunner"
+                     dynamic="true"/>
++    <extensionPoint qualifiedName="org.intellij.markdown.codeSpanRunnableSearcher"
++                    interface="org.intellij.plugins.markdown.extensions.MarkdownCodeSpanConfigurationContextSearcher"
++                    dynamic="true"/>
+     <extensionPoint qualifiedName="org.intellij.markdown.flavourProvider"
+                     interface="org.intellij.plugins.markdown.lang.parser.MarkdownFlavourProvider"
+                     dynamic="true"/>
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationContextSearcher.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationContextSearcher.kt
+new file mode 100644
+index 000000000000..e167d67c6744
+--- /dev/null
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationContextSearcher.kt
+@@ -0,0 +1,29 @@
++// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
++package org.intellij.plugins.markdown.extensions
++
++import com.intellij.execution.actions.ConfigurationContext
++import com.intellij.openapi.extensions.ExtensionPointName
++import com.intellij.openapi.project.DumbService
++import com.intellij.psi.PsiElement
++import org.jetbrains.annotations.ApiStatus
++
++@ApiStatus.Experimental
++@ApiStatus.OverrideOnly
++interface MarkdownCodeSpanConfigurationContextSearcher {
++  companion object {
++    internal val EP_NAME: ExtensionPointName<MarkdownCodeSpanConfigurationContextSearcher> = ExtensionPointName.create("org.intellij.markdown.codeSpanRunnableSearcher")
++
++    @JvmStatic
++    fun findAllConfigurations(runnableName: String, host: PsiElement): List<ConfigurationContext> {
++      val elements = mutableListOf<ConfigurationContext>()
++      DumbService.getInstance(host.project)
++        .filterByDumbAwareness(EP_NAME.extensionList)
++        .forEach {
++          elements.addAll(it.findConfigurations(runnableName, host))
++        }
++      return elements
++    }
++  }
++
++  fun findConfigurations(runnableName: String, host: PsiElement): List<ConfigurationContext>
++}
+\ No newline at end of file
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
+index 79458130ae53..ba28ce620ec9 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
+@@ -1,17 +1,23 @@
+ // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+ package org.intellij.plugins.markdown.extensions.jcef.commandRunner
+ 
++import com.intellij.execution.RunManager
++import com.intellij.execution.RunnerAndConfigurationSettings
+ import com.intellij.execution.executors.DefaultRunExecutor
+ import com.intellij.execution.lineMarker.RunLineMarkerContributor
++import com.intellij.execution.runners.ExecutionUtil
+ import com.intellij.icons.AllIcons
+ import com.intellij.openapi.actionSystem.AnAction
+ import com.intellij.openapi.actionSystem.AnActionEvent
+ import com.intellij.openapi.actionSystem.CommonDataKeys
+ import com.intellij.openapi.project.DumbAware
+ import com.intellij.openapi.util.NlsSafe
++import com.intellij.psi.PsiDocumentManager
+ import com.intellij.psi.PsiElement
++import com.intellij.psi.util.nextLeaf
+ import org.intellij.plugins.markdown.MarkdownBundle
+ import org.intellij.plugins.markdown.MarkdownUsageCollector.RUNNER_EXECUTED
++import org.intellij.plugins.markdown.extensions.MarkdownCodeSpanConfigurationContextSearcher
+ import org.intellij.plugins.markdown.extensions.jcef.commandRunner.CommandRunnerExtension.Companion.execute
+ import org.intellij.plugins.markdown.extensions.jcef.commandRunner.CommandRunnerExtension.Companion.matches
+ import org.intellij.plugins.markdown.extensions.jcef.commandRunner.CommandRunnerExtension.Companion.trimPrompt
+@@ -34,17 +40,20 @@ internal class MarkdownRunLineMarkersProvider: RunLineMarkerContributor(), DumbA
+       }
+     }
+ 
+-    val inCodeSpan = (element.hasType(MarkdownTokenTypes.BACKTICK)
+-                      && element.parent.hasType(MarkdownElementTypes.CODE_SPAN)
+-                      && element.parent.firstChild == element)
++    val inCodeSpan = isOpeningCodeSpanBacktick(element)
+     if (!(element.hasType(MarkdownTokenTypes.CODE_FENCE_CONTENT)
+           || inCodeSpan)) {
+       return null
+     }
+ 
+-    val dir = getMarkdownCommandWorkingDirectory(element.project, element.containingFile.virtualFile) ?: return null
+     val text = getText(element)
+-    if (!matches(element.project, dir, true, text, allowRunConfigurations = inCodeSpan)) {
++    if (inCodeSpan) {
++      val codeSpanInfo = processCodeSpan(element, text)
++      if (codeSpanInfo != null) return codeSpanInfo
++    }
++
++    val dir = getMarkdownCommandWorkingDirectory(element.project, element.containingFile.virtualFile) ?: return null
++    if (!matches(element.project, dir, true, text)) {
+       return null
+     }
+ 
+@@ -76,7 +85,35 @@ internal class MarkdownRunLineMarkersProvider: RunLineMarkerContributor(), DumbA
+         }
+       }
+     }
+-    return Info(AllIcons.RunConfigurations.TestState.Run_run, { runner.title() }, runAction)
++    return Info(AllIcons.RunConfigurations.TestState.Run_run, arrayOf(runAction)) { runner.title() }
++  }
++
++  private fun processCodeSpan(element: PsiElement, elementText: String): Info? {
++    val text = elementText.trim()
++    if (text.isBlank()) return null
++
++    val codeSpans = getAllCodeSpansOnLine(element)
++    if (codeSpans.firstOrNull() != element) return null
++
++    val configurations = codeSpans
++      .asSequence()
++      .map { getText(it).trim() to it }
++      .filter { it.first.isNotBlank() }
++      .distinctBy { it.first }
++      .flatMap { (text, host) ->
++        MarkdownCodeSpanConfigurationContextSearcher
++          .findAllConfigurations(text, host)
++          .mapNotNull { it.findExisting() ?: it.getConfiguration() }
++          .distinctBy { it.uniqueID }
++      }
++      .toList()
++    if (configurations.isEmpty()) return null
++
++    val actions = configurations.map(::RunConfigurationAction).toTypedArray()
++    return Info(
++      AllIcons.RunConfigurations.TestState.Run_run,
++      actions
++    ) { MarkdownBundle.message("markdown.runner.launch.command", text) }
+   }
+ 
+   private fun getText(element: PsiElement): @NlsSafe String {
+@@ -87,4 +124,49 @@ internal class MarkdownRunLineMarkersProvider: RunLineMarkerContributor(), DumbA
+     }
+     return ""
+   }
++
++  private fun getAllCodeSpansOnLine(element: PsiElement): List<PsiElement> {
++    val file = element.containingFile ?: return emptyList()
++    val document = PsiDocumentManager.getInstance(element.project).getDocument(file) ?: return listOf(element)
++
++    val line = document.getLineNumber(element.textRange.startOffset)
++    val lineStart = document.getLineStartOffset(line)
++    val lineEnd = document.getLineEndOffset(line)
++
++    val result = mutableListOf<PsiElement>()
++    var leaf = file.findElementAt(lineStart)
++
++    while (leaf != null) {
++      val leafRange = leaf.textRange
++      if (leafRange.startOffset >= lineEnd) break
++      if (leafRange.endOffset > lineStart && isOpeningCodeSpanBacktick(leaf) && getText(leaf).isNotBlank()) {
++        result.add(leaf)
++      }
++      leaf = leaf.nextLeaf()
++    }
++
++    return result
++  }
++
++  private fun isOpeningCodeSpanBacktick(element: PsiElement): Boolean =
++    element.hasType(MarkdownTokenTypes.BACKTICK)
++    && element.parent.hasType(MarkdownElementTypes.CODE_SPAN)
++    && element.parent.firstChild == element
++
++
++  private class RunConfigurationAction(private val settings: RunnerAndConfigurationSettings): AnAction({ settings.name }, settings.configuration.icon) {
++    override fun actionPerformed(event: AnActionEvent) {
++      val project = event.project ?: settings.configuration.project
++      TrustedProjectUtil.executeIfTrusted(project) {
++        val runManager = RunManager.getInstance(project)
++        if (!runManager.hasSettings(settings)) {
++          runManager.setTemporaryConfiguration(settings)
++        }
++        if (runManager.shouldSetRunConfigurationFromContext()) {
++          runManager.selectedConfiguration = settings
++        }
++        ExecutionUtil.runConfiguration(settings, DefaultRunExecutor.getRunExecutorInstance())
++      }
++    }
++  }
+ }
+diff --git a/plugins/markdown/java/BUILD.bazel b/plugins/markdown/java/BUILD.bazel
+new file mode 100644
+index 000000000000..3117907e93dd
+--- /dev/null
++++ b/plugins/markdown/java/BUILD.bazel
+@@ -0,0 +1,48 @@
++### auto-generated section `build intellij.markdown.java` start
++load("@rules_jvm//:jvm.bzl", "jvm_library")
++
++jvm_library(
++  name = "java",
++  module_name = "intellij.markdown.java",
++  visibility = ["//visibility:public"],
++  srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
++  resources = glob(["resources/**/*"]),
++  resource_strip_prefix = "resources",
++  deps = [
++    "@lib//:kotlin-stdlib",
++    "//platform/kernel/shared:kernel",
++    "//platform/platform-impl/rpc",
++    "//platform/platform-api:ide",
++    "//plugins/markdown/core:markdown",
++    "//platform/core-api:core",
++    "//java/java-indexing-api:indexing",
++    "//java/java-psi-api:psi",
++    "//platform/lang-api:lang",
++  ]
++)
++
++jvm_library(
++  name = "java_test_lib",
++  testonly = True,
++  module_name = "intellij.markdown.java",
++  visibility = ["//visibility:public"],
++  srcs = glob([], allow_empty = True),
++  runtime_deps = [
++    ":java",
++    "//platform/kernel/shared:kernel_test_lib",
++    "//platform/platform-impl/rpc:rpc_test_lib",
++    "//platform/platform-api:ide_test_lib",
++    "//plugins/markdown/core:markdown_test_lib",
++    "//platform/core-api:core_test_lib",
++    "//java/java-indexing-api:indexing_test_lib",
++    "//java/java-psi-api:psi_test_lib",
++    "//platform/lang-api:lang_test_lib",
++  ]
++)
++### auto-generated section `build intellij.markdown.java` end
++
++### auto-generated section `iml intellij.markdown.java` start
++exports_files([
++  "intellij.markdown.java.iml",
++], visibility = ["//visibility:public"])
++### auto-generated section `iml intellij.markdown.java` end
+\ No newline at end of file
+diff --git a/plugins/markdown/java/intellij.markdown.java.iml b/plugins/markdown/java/intellij.markdown.java.iml
+new file mode 100644
+index 000000000000..6ec5e09067ee
+--- /dev/null
++++ b/plugins/markdown/java/intellij.markdown.java.iml
+@@ -0,0 +1,21 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<module type="JAVA_MODULE" version="4">
++  <component name="NewModuleRootManager" inherit-compiler-output="true">
++    <exclude-output />
++    <content url="file://$MODULE_DIR$">
++      <sourceFolder url="file://$MODULE_DIR$/resources" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" packagePrefix="com.intellij.markdown.java" />
++    </content>
++    <orderEntry type="inheritedJdk" />
++    <orderEntry type="sourceFolder" forTests="false" />
++    <orderEntry type="library" name="kotlin-stdlib" level="project" />
++    <orderEntry type="module" module-name="intellij.platform.kernel" />
++    <orderEntry type="module" module-name="intellij.platform.ide.rpc" />
++    <orderEntry type="module" module-name="intellij.platform.ide" />
++    <orderEntry type="module" module-name="intellij.markdown" />
++    <orderEntry type="module" module-name="intellij.platform.core" />
++    <orderEntry type="module" module-name="intellij.java.indexing" />
++    <orderEntry type="module" module-name="intellij.java.psi" />
++    <orderEntry type="module" module-name="intellij.platform.lang" />
++  </component>
++</module>
+\ No newline at end of file
+diff --git a/plugins/markdown/java/resources/intellij.markdown.java.xml b/plugins/markdown/java/resources/intellij.markdown.java.xml
+new file mode 100644
+index 000000000000..ba189da227de
+--- /dev/null
++++ b/plugins/markdown/java/resources/intellij.markdown.java.xml
+@@ -0,0 +1,12 @@
++<idea-plugin>
++  <dependencies>
++    <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
++    <module name="intellij.java.indexing"/>
++    <module name="intellij.java.psi"/>
++    <module name="intellij.markdown"/>
++    <!-- endregion -->
++  </dependencies>
++  <extensions defaultExtensionNs="org.intellij.markdown">
++    <codeSpanRunnableSearcher implementation="com.intellij.markdown.java.JvmCodeSpanConfigurationContextSearcher"/>
++  </extensions>
++</idea-plugin>
+diff --git a/plugins/markdown/java/src/JvmCodeSpanConfigurationContextSearcher.kt b/plugins/markdown/java/src/JvmCodeSpanConfigurationContextSearcher.kt
+new file mode 100644
+index 000000000000..069dd3ee3d2c
+--- /dev/null
++++ b/plugins/markdown/java/src/JvmCodeSpanConfigurationContextSearcher.kt
+@@ -0,0 +1,18 @@
++package com.intellij.markdown.java
++
++import com.intellij.execution.actions.ConfigurationContext
++import com.intellij.psi.PsiElement
++import com.intellij.psi.search.GlobalSearchScope
++import com.intellij.psi.search.PsiShortNamesCache
++import org.intellij.plugins.markdown.extensions.MarkdownCodeSpanConfigurationContextSearcher
++
++internal class JvmCodeSpanConfigurationContextSearcher : MarkdownCodeSpanConfigurationContextSearcher {
++
++  override fun findConfigurations(runnableName: String, host: PsiElement): List<ConfigurationContext> {
++    val project = host.project
++    val scope = GlobalSearchScope.projectScope(project)
++    return PsiShortNamesCache.getInstance(project)
++      .getClassesByName(runnableName, scope)
++      .map { ConfigurationContext(it) }
++  }
++}
+diff --git a/plugins/markdown/plugin/BUILD.bazel b/plugins/markdown/plugin/BUILD.bazel
+index 2daa3b609605..0b3ddc085ae7 100644
+--- a/plugins/markdown/plugin/BUILD.bazel
++++ b/plugins/markdown/plugin/BUILD.bazel
+@@ -17,6 +17,7 @@ jvm_library(
+     "//plugins/markdown/xml",
+     "//plugins/markdown/compose:compose-preview",
+     "//plugins/markdown/core/frontend",
++    "//plugins/markdown/java",
+   ]
+ )
+ 
+@@ -38,6 +39,7 @@ jvm_library(
+     "//plugins/markdown/xml:xml_test_lib",
+     "//plugins/markdown/compose:compose-preview_test_lib",
+     "//plugins/markdown/core/frontend:frontend_test_lib",
++    "//plugins/markdown/java:java_test_lib",
+   ]
+ )
+ ### auto-generated section `build intellij.markdown.plugin.main` end
+diff --git a/plugins/markdown/plugin/intellij.markdown.plugin.main.iml b/plugins/markdown/plugin/intellij.markdown.plugin.main.iml
+index 01fe367feb39..a25f5fc76743 100644
+--- a/plugins/markdown/plugin/intellij.markdown.plugin.main.iml
++++ b/plugins/markdown/plugin/intellij.markdown.plugin.main.iml
+@@ -14,5 +14,6 @@
+     <orderEntry type="module" module-name="intellij.markdown.xml" scope="RUNTIME" />
+     <orderEntry type="module" module-name="intellij.markdown.compose.preview" scope="RUNTIME" />
+     <orderEntry type="module" module-name="intellij.markdown.frontend" scope="RUNTIME" />
++    <orderEntry type="module" module-name="intellij.markdown.java" scope="RUNTIME" />
+   </component>
+ </module>
+\ No newline at end of file
+diff --git a/plugins/markdown/test/BUILD.bazel b/plugins/markdown/test/BUILD.bazel
+index d80e3200c749..233e66b91566 100644
+--- a/plugins/markdown/test/BUILD.bazel
++++ b/plugins/markdown/test/BUILD.bazel
+@@ -8,6 +8,8 @@ jvm_library(
+   srcs = glob([], allow_empty = True),
+   runtime_deps = [
+     "//plugins/markdown/core:markdown",
++    "//plugins/markdown/java",
++    "//java/execution/impl",
+     "//plugins/markdown/fenceInjection",
+     "//plugins/markdown/frontmatter",
+     "//plugins/markdown/frontmatter/toml",
+@@ -52,6 +54,10 @@ jvm_library(
+     "//plugins/markdown/core:markdown_test_lib",
+     "//plugins/markdown/core/backend",
+     "//plugins/markdown/core/backend:backend_test_lib",
++    "//plugins/markdown/java",
++    "//plugins/markdown/java:java_test_lib",
++    "//java/execution/impl",
++    "//java/execution/impl:impl_test_lib",
+     "//plugins/markdown/fenceInjection",
+     "//plugins/markdown/fenceInjection:fenceInjection_test_lib",
+     "//plugins/markdown/frontmatter",
+diff --git a/plugins/markdown/test/intellij.markdown.tests.iml b/plugins/markdown/test/intellij.markdown.tests.iml
+index 37f35a157ac7..447065c4c02e 100644
+--- a/plugins/markdown/test/intellij.markdown.tests.iml
++++ b/plugins/markdown/test/intellij.markdown.tests.iml
+@@ -10,6 +10,8 @@
+     <orderEntry type="sourceFolder" forTests="false" />
+     <orderEntry type="module" module-name="intellij.markdown" />
+     <orderEntry type="module" module-name="intellij.markdown.backend" scope="TEST" />
++    <orderEntry type="module" module-name="intellij.markdown.java" />
++    <orderEntry type="module" module-name="intellij.java.execution.impl" />
+     <orderEntry type="module" module-name="intellij.markdown.fenceInjection" />
+     <orderEntry type="module" module-name="intellij.markdown.frontmatter" />
+     <orderEntry type="module" module-name="intellij.markdown.frontmatter.toml" />
+diff --git a/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationRunnerTest.kt b/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationRunnerTest.kt
+new file mode 100644
+index 000000000000..8d3f4f61c9e3
+--- /dev/null
++++ b/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationRunnerTest.kt
+@@ -0,0 +1,70 @@
++package org.intellij.plugins.markdown.extensions
++
++import com.intellij.codeInsight.daemon.LineMarkerInfo
++import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl
++import com.intellij.icons.AllIcons
++import com.intellij.openapi.actionSystem.DefaultActionGroup
++import com.intellij.openapi.actionSystem.Separator
++import com.intellij.openapi.editor.markup.GutterIconRenderer
++import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
++
++internal class MarkdownCodeSpanConfigurationRunnerTest : LightJavaCodeInsightFixtureTestCase() {
++
++  fun `test code span run marker is shown for Java class with main method`() {
++    addJavaClassWithMainMethod("JavaClass")
++    configureMarkdown("`JavaClass`")
++
++    val markers = findRunMarkers()
++    assertEquals(1, markers.size)
++    assertEquals(1, getPopupActionCount(markers))
++  }
++
++  fun `test code span run marker is not shown for absent Java class`() {
++    configureMarkdown("`JavaClass`")
++
++    val markers = findRunMarkers()
++    assertEmpty(markers)
++  }
++
++  fun `test duplicate code spans on one line produce one Java run action`() {
++    addJavaClassWithMainMethod("JavaClass")
++    configureMarkdown("`JavaClass` `JavaClass` `JavaClass`")
++
++    val markers = findRunMarkers()
++    assertEquals(1, markers.size)
++    assertEquals(1, getPopupActionCount(markers))
++  }
++
++  fun `test different code spans on one line produce separate Java run actions`() {
++    addJavaClassWithMainMethod("JavaClass1")
++    addJavaClassWithMainMethod("JavaClass2")
++    configureMarkdown("`JavaClass1` `JavaClass2`")
++
++    val markers = findRunMarkers()
++    assertEquals(1, markers.size)
++    assertEquals(2, getPopupActionCount(markers))
++  }
++
++  private fun configureMarkdown(text: String) {
++    myFixture.configureByText("a.md", text)
++    myFixture.checkHighlighting()
++  }
++
++  private fun addJavaClassWithMainMethod(name: String) {
++    myFixture.addClass("""
++      public class $name {
++        static void main(String[] args) {}
++      }
++    """.trimIndent())
++  }
++
++  private fun findRunMarkers(): List<LineMarkerInfo<*>> {
++    return DaemonCodeAnalyzerImpl.getLineMarkers(myFixture.editor.document, project)
++      .filter { it.icon == AllIcons.RunConfigurations.TestState.Run_run }
++  }
++
++  private fun getPopupActionCount(markers: List<LineMarkerInfo<*>>): Int {
++    val renderer = markers.single().createGutterRenderer() as GutterIconRenderer
++    return (renderer.popupMenuActions as? DefaultActionGroup)?.childActionsOrStubs?.count { it !is Separator } ?: 0
++  }
++}
+diff --git a/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/processLinks/processLinks.js b/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/processLinks/processLinks.js
+index e5a3fd6fa50d..9d4acc046628 100644
+--- a/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/processLinks/processLinks.js
++++ b/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/processLinks/processLinks.js
+@@ -39,6 +39,9 @@ if (window.__IntelliJTools === undefined) {
+       return true;
+     }
+     if (target.tagName.toLowerCase() === 'a' && hasHrefAttribute(target)) {
++      if (target.hasAttribute('data-command') || target.hasAttribute('data-commandtype')) {
++        return false;
++      }
+       e.stopPropagation();
+       return window.__IntelliJTools.processClick(target);
+     }
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
+index 6e7bb86374b5..f845fd8781e0 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
+@@ -42,6 +42,7 @@ import org.intellij.plugins.markdown.ui.preview.BrowserPipe
+ import org.intellij.plugins.markdown.ui.preview.MarkdownHtmlPanel
+ import org.intellij.plugins.markdown.ui.preview.ResourceProvider
+ import org.intellij.plugins.markdown.ui.preview.html.MarkdownUtil
++import java.util.UUID
+ import java.util.concurrent.ConcurrentHashMap
+ import kotlin.coroutines.cancellation.CancellationException
+ 
+@@ -49,6 +50,7 @@ internal class CommandRunnerExtension(
+   val panel: MarkdownHtmlPanel,
+   private val provider: Provider
+ ): MarkdownBrowserPreviewExtension {
++  private val sessionKey = UUID.randomUUID().toString()
+   override val scripts: List<String> = listOf("commandRunner/commandRunner.js")
+   override val styles: List<String> = listOf("commandRunner/commandRunner.css")
+   private val hash2Cmd = mutableMapOf<String, String>()
+@@ -114,7 +116,7 @@ internal class CommandRunnerExtension(
+       if (project != null && file != null
+           && matches(project, getMarkdownCommandWorkingDirectory(project, file), true, rawCodeLine.trim(), allowRunConfigurations)
+       ) {
+-        val hash = MarkdownUtil.md5(rawCodeLine, "")
++        val hash = MarkdownUtil.md5(rawCodeLine, sessionKey)
+         hash2Cmd[hash] = rawCodeLine
+         return hash
+       }
+@@ -144,7 +146,7 @@ internal class CommandRunnerExtension(
+       }
+       if (runner == null) return ""
+ 
+-      val hash = MarkdownUtil.md5(codeFenceRawContent, "")
++      val hash = MarkdownUtil.md5(codeFenceRawContent, sessionKey)
+       hash2Cmd[hash] = codeFenceRawContent
+       val lines = codeFenceRawContent.trimEnd().lines()
+       val firstLineHash = if (lines.size > 1) processLine(lines[0], false) else null
+@@ -173,7 +175,7 @@ internal class CommandRunnerExtension(
+       val cmdHash: String = data.substringAfter(":")
+       val command = hash2Cmd[cmdHash]
+       if (command == null) {
+-        LOG.error("Command index $cmdHash not found. Please attach .md file to error report. commandCache = ${hash2Cmd}")
++        LOG.error("Command index not found. Please attach .md file to error report.")
+         return true
+       }
+       executeLineCommand(command, executorId)
+@@ -213,7 +215,7 @@ internal class CommandRunnerExtension(
+       val command = hash2Cmd[cmdHash]
+       val firstLineCommand = hash2Cmd[args[2]]
+       if (command == null) {
+-        LOG.error("Command hash $cmdHash not found. Please attach .md file to error report.\n${hash2Cmd}")
++        LOG.error("Command hash not found. Please attach .md file to error report.")
+         return true
+       }
+       val trimmedCmd = trimPrompt(command)
+diff --git a/plugins/markdown/core/resources/messages/MarkdownBundle.properties b/plugins/markdown/core/resources/messages/MarkdownBundle.properties
+index 19e5abd0f365..f5406d05deda 100644
+--- a/plugins/markdown/core/resources/messages/MarkdownBundle.properties
++++ b/plugins/markdown/core/resources/messages/MarkdownBundle.properties
+@@ -230,6 +230,9 @@ markdown.rename.factory.option.name=Rename bound documents
+ markdown.runner.launch.command=Run ''{0}''
+ markdown.runner.launch.block=Run Block
+ markdown.runner.launch.line=Run Line
++markdown.runner.preview.confirm.title=Run Command from Markdown Preview?
++markdown.runner.preview.confirm.message=The Markdown preview is about to run the following command:\n\n{0}\n\nRun it only if you intentionally triggered this action. A document''s styling can hide or move the run button so that a click lands somewhere you did not expect.
++markdown.runner.preview.confirm.run=Run
+ 
+ action.Markdown.OpenDevtools.text=Open Devtools Window For The Current Markdown Preview
+ 
+diff --git a/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/commandRunner/commandRunner/commandRunner.css b/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/commandRunner/commandRunner/commandRunner.css
+index 3e8a39c49e8d..3c92d2b257c0 100644
+--- a/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/commandRunner/commandRunner/commandRunner.css
++++ b/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/commandRunner/commandRunner/commandRunner.css
+@@ -20,4 +20,11 @@
+ 
+ .hidden {
+   display: none;
++}
++
++.run-icon::before,
++.run-icon::after,
++.run-icon-line::before,
++.run-icon-line::after {
++  content: none;
+ }
+\ No newline at end of file
+diff --git a/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/commandRunner/commandRunner/commandRunner.js b/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/commandRunner/commandRunner/commandRunner.js
+index 9b2713983702..f7ffaead09f8 100644
+--- a/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/commandRunner/commandRunner/commandRunner.js
++++ b/plugins/markdown/core/resources/org/intellij/plugins/markdown/extensions/jcef/commandRunner/commandRunner/commandRunner.js
+@@ -18,6 +18,88 @@ if (window.__IntelliJTools === undefined) {
+     finally {}
+   };
+ 
++  // Clickjacking guard. Author CSS shares this document and can hide, move, resize, or overlay the run
++  // button so a click meant for elsewhere triggers a command. These checks read live geometry and
++  // visibility, which CSS cannot fake, so a hijacked click is confirmed by the IDE or runs nothing.
++  const isVisiblySolid = (el) => {
++    let node = el;
++    while (node) {
++      const style = window.getComputedStyle(node);
++      if (style.visibility === 'hidden' || style.visibility === 'collapse') {
++        return false;
++      }
++      const opacity = parseFloat(style.opacity);
++      if (!Number.isNaN(opacity) && opacity < 0.9) {
++        return false;
++      }
++      // A filter (opacity(), brightness(0), blur(), ...) can make the icon invisible while it stays
++      // clickable and elementFromPoint still resolves to it - the opacity property above does not see this.
++      if (style.filter && style.filter !== 'none') {
++        return false;
++      }
++      node = node.parentElement;
++    }
++    return true;
++  };
++
++  const iconFitsViewport = (rect) =>
++    rect.width > 0 && rect.height > 0 &&
++    rect.width <= window.innerWidth * 0.5 && rect.height <= window.innerHeight * 0.5;
++
++  const pointInside = (rect, x, y) =>
++    x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
++
++  const isClickableIcon = (icon, x, y) => {
++    if (icon === null) {
++      return false;
++    }
++    const rect = icon.getBoundingClientRect();
++    return iconFitsViewport(rect) && pointInside(rect, x, y) && isVisiblySolid(icon);
++  };
++
++  const isGenuineButtonClick = (e, icon) => {
++    // The cursor must hit the run <img> itself with nothing on top: elementFromPoint reports the <a> for a
++    // pseudo-element and a foreign element for an overlay, so a disguised or covered button fails here.
++    return window.document.elementFromPoint(e.clientX, e.clientY) === icon
++      && isClickableIcon(icon, e.clientX, e.clientY);
++  };
++
++  const runIconAnchorBeneath = (x, y) => {
++    for (const element of window.document.elementsFromPoint(x, y)) {
++      const anchor = element.closest('a[data-command]');
++      if (anchor !== null && isClickableIcon(anchor.querySelector('img'), x, y)) {
++        return anchor;
++      }
++    }
++    return null;
++  };
++
++  const resolveRunTarget = (e, target) => {
++    // Keyboard activation has detail 0 and no coordinates; trust it (the CSP forbids forged events).
++    if (e.detail === 0) {
++      return { anchor: target, needsConfirmation: "0" };
++    }
++    const icon = target.querySelector('img');
++    if (icon !== null) {
++      return { anchor: target, needsConfirmation: isGenuineButtonClick(e, icon) ? "0" : "1" };
++    }
++    // No run icon on the clicked anchor (an author overlay such as #jump): run the real icon beneath the
++    // cursor, always confirming because something is layered on top.
++    const realAnchor = runIconAnchorBeneath(e.clientX, e.clientY);
++    return realAnchor === null ? null : { anchor: realAnchor, needsConfirmation: "1" };
++  };
++
++  const postRunRequest = (e, anchor, needsConfirmation) => {
++    const cmd = anchor.getAttribute('data-command');
++    const cmdType = anchor.getAttribute('data-commandtype');
++    const firstLineHash = anchor.getAttribute('data-firstLine');
++    if (cmdType === 'block') {
++      runBlock(cmd + ":" + firstLineHash + ":" + e.clientX + ":" + e.clientY + ":" + needsConfirmation);
++    } else {
++      runLine(cmd + ":" + needsConfirmation);
++    }
++  };
++
+   window.document.addEventListener("click", function(e) {
+     let target = e.target;
+     while (target && target.tagName !== 'A') {
+@@ -29,13 +111,9 @@ if (window.__IntelliJTools === undefined) {
+     if (target.tagName === 'A' && target.hasAttribute("data-command")) {
+       e.stopPropagation();
+       e.preventDefault();
+-      const cmd = target.getAttribute('data-command')
+-      let cmdType = target.getAttribute('data-commandtype')
+-      let firstLineHash = target.getAttribute('data-firstLine')
+-      if (cmdType === 'block') {
+-        runBlock(cmd + ":" + firstLineHash + ":" + e.clientX + ":" + e.clientY);
+-      } else {
+-        runLine(cmd);
++      const resolved = resolveRunTarget(e, target);
++      if (resolved !== null) {
++        postRunRequest(e, resolved.anchor, resolved.needsConfirmation);
+       }
+       return false;
+     }
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
+index f845fd8781e0..69ab29c92ab2 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/CommandRunnerExtension.kt
+@@ -26,6 +26,8 @@ import com.intellij.openapi.diagnostic.ControlFlowException
+ import com.intellij.openapi.diagnostic.logger
+ import com.intellij.openapi.project.Project
+ import com.intellij.openapi.project.BaseProjectDirectories
++import com.intellij.openapi.ui.MessageDialogBuilder
++import com.intellij.openapi.ui.Messages
+ import com.intellij.openapi.util.Disposer
+ import com.intellij.openapi.util.registry.Registry
+ import com.intellij.openapi.vfs.LocalFileSystem
+@@ -171,14 +173,18 @@ internal class CommandRunnerExtension(
+ 
+   private fun createRunLineHandler() = object : BrowserPipe.Handler {
+     override fun processMessageReceived(data: String): Boolean {
+-      val executorId = data.substringBefore(":")
+-      val cmdHash: String = data.substringAfter(":")
++      val parts = data.split(":")
++      val executorId = parts[0]
++      val cmdHash: String = parts.getOrElse(1) { "" }
++      val needsConfirmation = parts.getOrNull(2) == NEEDS_CONFIRMATION
+       val command = hash2Cmd[cmdHash]
+       if (command == null) {
+         LOG.error("Command index not found. Please attach .md file to error report.")
+         return true
+       }
+-      executeLineCommand(command, executorId)
++      runWithConfirmationIfNeeded(needsConfirmation, command) {
++        executeLineCommand(command, executorId)
++      }
+       return false
+     }
+   }
+@@ -207,6 +213,30 @@ internal class CommandRunnerExtension(
+     }
+   }
+ 
++  private fun runWithConfirmationIfNeeded(needsConfirmation: Boolean, command: String, runAction: () -> Unit) {
++    if (needsConfirmation) confirmThenRun(command, runAction) else runAction()
++  }
++
++  private fun confirmThenRun(command: String, runAction: () -> Unit) {
++    ApplicationManager.getApplication().invokeLater {
++      if (confirmPreviewCommandExecution(command)) {
++        runAction()
++      }
++    }
++  }
++
++  private fun confirmPreviewCommandExecution(command: String): Boolean {
++    return MessageDialogBuilder
++      .yesNo(
++        MarkdownBundle.message("markdown.runner.preview.confirm.title"),
++        MarkdownBundle.message("markdown.runner.preview.confirm.message", command.trim())
++      )
++      .icon(Messages.getWarningIcon())
++      .yesText(MarkdownBundle.message("markdown.runner.preview.confirm.run"))
++      .noText(Messages.getCancelButton())
++      .ask(panel.project)
++  }
++
+   private fun createRunBlockHandler() = object : BrowserPipe.Handler{
+     override fun processMessageReceived(data: String): Boolean {
+       val args = data.split(":")
+@@ -219,14 +249,21 @@ internal class CommandRunnerExtension(
+         return true
+       }
+       val trimmedCmd = trimPrompt(command)
++      val needsConfirmation = args.getOrNull(5) == NEEDS_CONFIRMATION
++      if (needsConfirmation) {
++        confirmThenRun(trimmedCmd) {
++          executeBlock(trimmedCmd, executorId)
++        }
++        return false
++      }
+       if (firstLineCommand == null) {
+         ApplicationManager.getApplication().invokeLater {
+           executeBlock(trimmedCmd, executorId)
+         }
+         return false
+       }
+-      val x = args[3].toInt()
+-      val y = args[4].toInt()
++      val x = args[3].toDoubleOrNull()?.toInt() ?: 0
++      val y = args[4].toDoubleOrNull()?.toInt() ?: 0
+ 
+       val actionManager = ActionManager.getInstance()
+       val actionGroup = DefaultActionGroup()
+@@ -281,6 +318,7 @@ internal class CommandRunnerExtension(
+     private const val RUN_BLOCK_EVENT = "runBlock"
+     private const val RUN_LINE_ICON = "commandRunner/run.png"
+     private const val RUN_BLOCK_ICON = "commandRunner/runrun.png"
++    private const val NEEDS_CONFIRMATION = "1"
+ 
+     const val extensionId = "MarkdownCommandRunnerExtension"
+ 
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
+index ba28ce620ec9..ebb230f716f1 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/extensions/jcef/commandRunner/MarkdownRunLineMarkersProvider.kt
+@@ -14,6 +14,9 @@ import com.intellij.openapi.project.DumbAware
+ import com.intellij.openapi.util.NlsSafe
+ import com.intellij.psi.PsiDocumentManager
+ import com.intellij.psi.PsiElement
++import com.intellij.psi.util.CachedValueProvider
++import com.intellij.psi.util.CachedValuesManager
++import com.intellij.psi.util.PsiModificationTracker
+ import com.intellij.psi.util.nextLeaf
+ import org.intellij.plugins.markdown.MarkdownBundle
+ import org.intellij.plugins.markdown.MarkdownUsageCollector.RUNNER_EXECUTED
+@@ -23,6 +26,7 @@ import org.intellij.plugins.markdown.extensions.jcef.commandRunner.CommandRunner
+ import org.intellij.plugins.markdown.extensions.jcef.commandRunner.CommandRunnerExtension.Companion.trimPrompt
+ import org.intellij.plugins.markdown.injection.aliases.CodeFenceLanguageGuesser
+ import org.intellij.plugins.markdown.lang.MarkdownElementTypes
++import org.intellij.plugins.markdown.lang.MarkdownLanguage
+ import org.intellij.plugins.markdown.lang.MarkdownTokenTypes
+ import org.intellij.plugins.markdown.lang.psi.impl.MarkdownCodeFence
+ import org.intellij.plugins.markdown.lang.psi.util.hasType
+@@ -92,10 +96,26 @@ internal class MarkdownRunLineMarkersProvider: RunLineMarkerContributor(), DumbA
+     val text = elementText.trim()
+     if (text.isBlank()) return null
+ 
++    val configurations = CachedValuesManager.getCachedValue(element) {
++      CachedValueProvider.Result.create(
++        getConfigurations(element),
++        PsiModificationTracker.getInstance(element.project).forLanguages { !it.isKindOf(MarkdownLanguage.INSTANCE) }
++      )
++    }
++    if (configurations.isEmpty()) return null
++
++    val actions = configurations.map(::RunConfigurationAction).toTypedArray()
++    return Info(
++      AllIcons.RunConfigurations.TestState.Run_run,
++      actions
++    ) { MarkdownBundle.message("markdown.runner.launch.command", text) }
++  }
++
++  private fun getConfigurations(element: PsiElement): List<RunnerAndConfigurationSettings> {
+     val codeSpans = getAllCodeSpansOnLine(element)
+-    if (codeSpans.firstOrNull() != element) return null
++    if (codeSpans.firstOrNull() != element) return emptyList()
+ 
+-    val configurations = codeSpans
++    return codeSpans
+       .asSequence()
+       .map { getText(it).trim() to it }
+       .filter { it.first.isNotBlank() }
+@@ -103,17 +123,10 @@ internal class MarkdownRunLineMarkersProvider: RunLineMarkerContributor(), DumbA
+       .flatMap { (text, host) ->
+         MarkdownCodeSpanConfigurationContextSearcher
+           .findAllConfigurations(text, host)
+-          .mapNotNull { it.findExisting() ?: it.getConfiguration() }
++          .mapNotNull { it.getConfiguration() }
+           .distinctBy { it.uniqueID }
+       }
+       .toList()
+-    if (configurations.isEmpty()) return null
+-
+-    val actions = configurations.map(::RunConfigurationAction).toTypedArray()
+-    return Info(
+-      AllIcons.RunConfigurations.TestState.Run_run,
+-      actions
+-    ) { MarkdownBundle.message("markdown.runner.launch.command", text) }
+   }
+ 
+   private fun getText(element: PsiElement): @NlsSafe String {
+diff --git a/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationRunnerTest.kt b/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationRunnerTest.kt
+index 8d3f4f61c9e3..bb068ecf7c86 100644
+--- a/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationRunnerTest.kt
++++ b/plugins/markdown/test/src/org/intellij/plugins/markdown/extensions/MarkdownCodeSpanConfigurationRunnerTest.kt
+@@ -19,7 +19,8 @@ internal class MarkdownCodeSpanConfigurationRunnerTest : LightJavaCodeInsightFix
+     assertEquals(1, getPopupActionCount(markers))
+   }
+ 
+-  fun `test code span run marker is not shown for absent Java class`() {
++  fun `test code span run marker is not shown for non-runnable Java class`() {
++    myFixture.addClass("public class JavaClass {}")
+     configureMarkdown("`JavaClass`")
+ 
+     val markers = findRunMarkers()
+diff --git a/platform/ui.jcef/jcef/JBCefScrollbarsHelper.java b/platform/ui.jcef/jcef/JBCefScrollbarsHelper.java
+index 895a55ebe7cb..0488c221e2a4 100644
+--- a/platform/ui.jcef/jcef/JBCefScrollbarsHelper.java
++++ b/platform/ui.jcef/jcef/JBCefScrollbarsHelper.java
+@@ -3,7 +3,6 @@ package com.intellij.ui.jcef;
+ 
+ import com.intellij.diagnostic.LoadingState;
+ import com.intellij.ide.ui.UISettings;
+-import com.intellij.ide.ui.UISettingsUtils;
+ import com.intellij.openapi.diagnostic.Logger;
+ import com.intellij.openapi.editor.colors.ColorKey;
+ import com.intellij.openapi.editor.colors.EditorColorsManager;
+@@ -257,15 +256,15 @@ public final class JBCefScrollbarsHelper {
+   }
+ 
+   private static int getTrackSizePx() {
+-    return (int)(JBCefApp.normalizeScaledSize(SystemInfo.isMac ? 14 : 10) * UISettingsUtils.getInstance().getCurrentIdeScale());
++    return JBCefApp.normalizeScaledSize(14);
+   }
+ 
+   private static int getThumbPaddingPx() {
+-    return (int)(JBCefApp.normalizeScaledSize(SystemInfo.isMac ? 3 : 1) * UISettingsUtils.getInstance().getCurrentIdeScale());
++    return JBCefApp.normalizeScaledSize(3);
+   }
+ 
+   private static int getThumbRadiusPx() {
+-    return (int)(JBCefApp.normalizeScaledSize(SystemInfo.isMac ? 7 : 0) * UISettingsUtils.getInstance().getCurrentIdeScale());
++    return JBCefApp.normalizeScaledSize(7);
+   }
+ 
+ 

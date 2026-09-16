@@ -1,0 +1,932 @@
+# JCEF/CEF changes: Jupyter/Python CEF consumers
+# Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
+# Apply with: git apply 0005-jupyter-python-cef-consumers.patch
+#
+#   dc63d7121c3d6b9720b4a0e831de525b794fa751 2026-05-06 Nikita.Ashihmin | PY-89532 Jupyter: rewrite CEF sync to v2
+#   ddd7464712dcf9a3f36782613495c7b3a47dbabd 2026-07-20 Konstantin Bulenkov | IJPL-250575 Scroll trap on the What's New page
+#   a1136dd7a9a4bb2b2d2890d48083a330f39a38d0 2026-08-06 Nikita Pavlenko | [PyCharm] WhatsNew (feat): WhatsNew Vision and Legacy modes, switching and disabling reworked. #PY-91405 Ready For Merge
+#   3a0c99a60710cd95d8c511c91a20d8789746515e 2026-07-30 TimurMalanin | PY-91324 [PPTW] scope PySdkListener updates to the owning project PySdkListener is published on the application message bus, so every open project's PyPackagingToolWindowService received module SDK updates from unrelated projects and re-pointed itself at the foreign SDK. When the user created a venv in project B, project A's PPTW switched to that venv. Gate the callback on module.project == project so only the project that owns the module reacts.
+#
+diff --git a/platform/remote-driver/test-sdk/src/com/intellij/driver/sdk/ui/components/elements/JcefOffScreenViewComponentUi.kt b/platform/remote-driver/test-sdk/src/com/intellij/driver/sdk/ui/components/elements/JcefOffScreenViewComponentUi.kt
+index 8d9796a7fbb3..9d7908d20720 100644
+--- a/platform/remote-driver/test-sdk/src/com/intellij/driver/sdk/ui/components/elements/JcefOffScreenViewComponentUi.kt
++++ b/platform/remote-driver/test-sdk/src/com/intellij/driver/sdk/ui/components/elements/JcefOffScreenViewComponentUi.kt
+@@ -7,11 +7,12 @@ import com.intellij.driver.sdk.ui.components.UiComponent
+ class JcefOffScreenViewComponent(data: ComponentData) : UiComponent(data) {
+   private val browser by lazy { driver.cast(component, JcefOffScreenViewComponentRef::class) }
+ 
+-  val htmlSource
++  val htmlSource: String
+     get() = browser.getSource()
+ }
+ 
+-@Remote("com.intellij.jupyter.core.jupyter.editor.outputs.webOutputs.offscreen.raster.JcefOffScreenViewComponent", plugin = "intellij.jupyter/intellij.jupyter.core")
++@Remote("com.intellij.jupyter.core.jupyter.editor.outputs.webOutputs.component.JcefOffScreenViewComponent",
++        plugin = "intellij.jupyter/intellij.jupyter.core")
+ interface JcefOffScreenViewComponentRef {
+   fun getSource(): String
+ }
+\ No newline at end of file
+diff --git a/platform/ui.jcef/jcef/SettingsHelper.java b/platform/ui.jcef/jcef/SettingsHelper.java
+index 9569a3f886f8..a2673cd50612 100644
+--- a/platform/ui.jcef/jcef/SettingsHelper.java
++++ b/platform/ui.jcef/jcef/SettingsHelper.java
+@@ -1,4 +1,4 @@
+-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
++// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+ package com.intellij.ui.jcef;
+ 
+ import com.intellij.execution.Platform;
+@@ -187,6 +187,14 @@ final class SettingsHelper {
+         doTrackGPUCrashes.set(true);
+     }
+ 
++    if (settings.windowless_rendering_enabled && RegistryManager.getInstance().is("ide.browser.jcef.osr.siteIsolation.disable")) {
++      // In OSR mode wheel events routed to an unscrollable cross-origin iframe are not bubbled back to the parent page,
++      // so page scrolling gets stuck while the pointer is over such an iframe, e.g. a YouTube embed on the What's New page.
++      // Disabling site isolation keeps cross-origin iframes in the parent's renderer where Blink handles scroll chaining itself.
++      // See https://github.com/chromiumembedded/cef/issues/3325
++      args = ArrayUtil.mergeArrays(args, "--disable-site-isolation-trials");
++    }
++
+     // Sometimes it's useful to be able to pass any additional keys (see IDEA-248140)
+     // NOTE: List of keys: https://peter.sh/experiments/chromium-command-line-switches/
+     String extraArgsProp = System.getProperty("ide.browser.jcef.extra.args", "");
+diff --git a/platform/util/resources/misc/registry.properties b/platform/util/resources/misc/registry.properties
+index 297ddc9fa98c..9a5be1160d09 100644
+--- a/platform/util/resources/misc/registry.properties
++++ b/platform/util/resources/misc/registry.properties
+@@ -422,6 +422,9 @@ ide.browser.jcef.osr.enabled.restartRequired=true
+ ide.browser.jcef.osr.enabled.description=Enable per-browser off-screen rendering mode for JCEF
+ ide.browser.jcef.osr.wheelRotation.factor=40
+ ide.browser.jcef.osr.wheelRotation.factor.description=The factor to multiply MouseWheelEvent.getWheelRotation() in a buffered OSR browser.
++ide.browser.jcef.osr.siteIsolation.disable=true
++ide.browser.jcef.osr.siteIsolation.disable.restartRequired=true
++ide.browser.jcef.osr.siteIsolation.disable.description=Disables Chromium site isolation (site-per-process) when JCEF off-screen rendering is enabled. Works around page scrolling getting stuck while the mouse pointer is over a cross-origin iframe (e.g., a YouTube video on the What's New page). Set to false to keep site isolation enabled.
+ ide.browser.jcef.osr.measureFPS.id=OSR JCEF FPS Meter
+ ide.browser.jcef.osr.measureFPS.id.description=JCEF OSR browser FPS Meter string ID.
+ ide.browser.jcef.osr.measureFPS.scroll=false
+diff --git a/python/ide/impl/resources/intellij.pycharm.community.ide.impl.xml b/python/ide/impl/resources/intellij.pycharm.community.ide.impl.xml
+index 609de3ff40f1..80e1ef6e7f8c 100644
+--- a/python/ide/impl/resources/intellij.pycharm.community.ide.impl.xml
++++ b/python/ide/impl/resources/intellij.pycharm.community.ide.impl.xml
+@@ -147,6 +147,8 @@
+     <startPagePromoter
+       implementation="com.intellij.pycharm.community.ide.impl.promo.WelcomeToUnifiedWelcomeScreenBanner"/>
+     <applicationSettings service="com.intellij.pycharm.community.ide.impl.newProjectWizard.welcome.PyWelcomeSettings"/>
++
++    <postStartupActivity implementation="com.intellij.pycharm.community.ide.impl.whatsnew.PyCharmJcefWhatsNewPatcher" order="first"/>
+   </extensions>
+ 
+   <applicationListeners>
+diff --git a/python/ide/impl/resources/whatsNew/.keep b/python/ide/impl/resources/whatsNew/.keep
+new file mode 100644
+index 000000000000..e69de29bb2d1
+diff --git a/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/PyCharmJcefWhatsNewPatcher.kt b/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/PyCharmJcefWhatsNewPatcher.kt
+new file mode 100644
+index 000000000000..b4346e6b2871
+--- /dev/null
++++ b/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/PyCharmJcefWhatsNewPatcher.kt
+@@ -0,0 +1,22 @@
++// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
++package com.intellij.pycharm.community.ide.impl.whatsnew
++
++import com.intellij.openapi.project.Project
++import com.intellij.openapi.startup.ProjectActivity
++import com.intellij.openapi.updateSettings.impl.UpdateSettings
++import com.intellij.platform.whatsNew.WhatsNewInVisionContentProvider
++import java.util.concurrent.atomic.AtomicBoolean
++
++// Disabling legacy whatsnew page in JcefWhatsNewProjectActivity if PyCharm Vision WhatsNewPage is available.
++internal class PyCharmJcefWhatsNewPatcher : ProjectActivity {
++  private val isStarted = AtomicBoolean(false)
++
++  override suspend fun execute(project: Project) {
++    if (isStarted.getAndSet(true)) return
++
++    val provider = WhatsNewInVisionContentProvider.getInstance()
++    if (provider.isAvailable()) {
++      UpdateSettings.getInstance().whatsNewShownFor = 0
++    }
++  }
++}
+diff --git a/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/PyCharmWhatsNewInVisionContentProvider.kt b/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/PyCharmWhatsNewInVisionContentProvider.kt
+index e390140af950..895e280fe2f0 100644
+--- a/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/PyCharmWhatsNewInVisionContentProvider.kt
++++ b/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/PyCharmWhatsNewInVisionContentProvider.kt
+@@ -1,21 +1,35 @@
+ // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+ package com.intellij.pycharm.community.ide.impl.whatsnew
+ 
++import com.intellij.openapi.application.ApplicationInfo
+ import com.intellij.openapi.application.InitialConfigImportState
+ import com.intellij.platform.whatsNew.WhatsNewInVisionContentProvider
+-import com.intellij.util.PlatformUtils.isCommunityEdition
+ 
+ // The files are missing in master. Both files were added, and version was updated only in stable brunches.
+-class PyCharmWhatsNewInVisionContentProvider : WhatsNewInVisionContentProvider() {
++internal class PyCharmWhatsNewInVisionContentProvider : WhatsNewInVisionContentProvider() {
+   override val baseResourcePathInClassLoader: String = "whatsNew"
+-  override val visionJsonFileNames: List<String> = listOf(if (isCommunityEdition()) "pycharmCE2025.2.json" else "pycharm2025.2.json")
++
++  private var visionFileNames: List<String>? = null
++
++  override val visionJsonFileNames: List<String>
++    get() = visionFileNames.orEmpty()
++
++  private suspend fun getVisionFileNames(): List<String> {
++    val applicationInfo = ApplicationInfo.getInstance()
++
++    val fileName = "pycharm${applicationInfo.majorVersion}.${applicationInfo.minorVersion}.json"
++    if (getResource(getResourceNameByPath(fileName)).checkAvailability()) {
++      return listOf(fileName)
++    }
++
++    return emptyList()
++  }
+ 
+   override suspend fun isAvailable(): Boolean {
+-    // Will skip WhatsNew if the first launch / new user, not to overload user with info.
+-    if (InitialConfigImportState.isNewUser()) {
+-      return false
++    if (visionFileNames == null) {
++      visionFileNames = getVisionFileNames()
+     }
+ 
+-    return super.isAvailable()
++    return !InitialConfigImportState.isNewUser() && super.isAvailable()
+   }
+ }
+\ No newline at end of file
+diff --git a/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/README.md b/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/README.md
+new file mode 100644
+index 000000000000..e47f8fe0d49f
+--- /dev/null
++++ b/python/ide/impl/src/com/intellij/pycharm/community/ide/impl/whatsnew/README.md
+@@ -0,0 +1,37 @@
++# Want a new Vision WhatsNew page
++Put the files under community\python\ide\impl\resources\whatsNew
++
++Example files placement:
++```
++whatsNew
++  - static.upl.6130.2026
++  - pycharm2026.1.json
++```
++
++Vision main JSON should be named with pycharm{majorVersion}.{minorVersion}.json. For example: pycharm2026.1.json
++
++# How showing of whatsNew works
++We have ApplicationInfo.getInstance().majorVersion / minorVersion
++For example, 2026.1, or 2027.3. 2026 - majorVersion, 1 - minorVersion.
++
++If the file exists, we're disabling legacy WhatsNew
++If missing, the legacy WhatsNew will be shown by its default rules.
++
++# Where to look in code
++
++We have two different WhatsNew pages which are working separately.
++
++1. Original WhatsNew page via URL
++
++`com.intellij.openapi.updateSettings.impl.JcefWhatsNewProjectActivity`
++registered in
++`community\platform\platform-impl\jcef\resources\intellij.platform.ide.impl.jcef.xml`
++with `order="last"`
++
++```<postStartupActivity implementation="com.intellij.openapi.updateSettings.impl.JcefWhatsNewProjectActivity" order="last"/>```
++
++
++2. New WhatsNew Page via vision
++   We have platform `com.intellij.platform.whatsNew.WhatsNewShowOnStartCheckService`
++and PyCharm provider
++   `com.intellij.pycharm.community.ide.impl.whatsnew.PyCharmWhatsNewInVisionContentProvider`
+diff --git a/python/pluginResources/messages/PyBundle.properties b/python/pluginResources/messages/PyBundle.properties
+index fb4bb7b6d209..a6eebca1a7b3 100644
+--- a/python/pluginResources/messages/PyBundle.properties
++++ b/python/pluginResources/messages/PyBundle.properties
+@@ -1398,7 +1398,7 @@ python.packaging.repository.form.tab.packages.search=Search for Packages
+ python.packaging.repository.form.enabled=Enable repository
+ python.packaging.repository.form.url.root.path.warning=URL has no path. Specify the package index endpoint (e.g. https://your-server/simple/)
+ python.packaging.repository.duplicate.name.error=A repository with this name already exists
+-python.toolwindow.packages.uninstalled.label=Uninstalled
++python.toolwindow.packages.uninstalled.label=Not installed
+ python.packaging.loading.packages.progress.text=Loading packages\u2026
+ notification.group.packaging=Python packaging
+ notification.group.packaging.toolwindow=Python Packages
+@@ -1640,8 +1640,8 @@ package.install.with.options.dialog.message=Options:
+ package.install.with.options.dialog.title=Package Install with Options
+ python.toolwindow.packages.collapse.all.action=Collapse All
+ python.toolwindow.packages.reload.packages.action=Reload Packages
+-python.toolwindow.packages.move.to.right.action=Move to Right
+-python.toolwindow.packages.move.to.bottom.action=Move to Bottom
++python.toolwindow.packages.move.to.right.action=Move tool window to right bottom corner
++python.toolwindow.packages.move.to.bottom.action=Move tool window to bottom left corner
+ python.toolwindow.packages.interpreters.action=Interpreters...
+ python.toolwindow.packages.repositories.action=Repositories...
+ python.toolwindow.packages.settings.group=Settings
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/PyInterpreterHeaderTitleRenderer.kt b/python/src/com/jetbrains/python/packaging/toolwindow/PyInterpreterHeaderTitleRenderer.kt
+index 8f357f8c6fa9..7f3bb02380de 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/PyInterpreterHeaderTitleRenderer.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/PyInterpreterHeaderTitleRenderer.kt
+@@ -2,40 +2,92 @@
+ package com.jetbrains.python.packaging.toolwindow
+ 
+ import com.intellij.openapi.actionSystem.ActionToolbar
++import com.intellij.openapi.actionSystem.ActionUpdateThread
++import com.intellij.openapi.actionSystem.AnAction
++import com.intellij.openapi.actionSystem.AnActionEvent
++import com.intellij.openapi.actionSystem.Presentation
++import com.intellij.openapi.actionSystem.ex.CustomComponentAction
+ import com.intellij.openapi.ui.shortenTextWithEllipsis
+ import com.intellij.openapi.util.NlsSafe
+-import com.intellij.openapi.util.text.HtmlChunk
+ import com.intellij.openapi.wm.ToolWindow
+-import com.intellij.ui.ColorUtil
++import com.intellij.ui.components.JBLabel
+ import com.intellij.util.concurrency.annotations.RequiresEdt
+ import com.intellij.util.ui.GraphicsUtil
++import com.intellij.util.ui.JBUI
+ import com.intellij.util.ui.UIUtil
+ import org.jetbrains.annotations.Nls
+-import java.awt.Font
++import java.awt.FlowLayout
++import javax.swing.JComponent
++import javax.swing.JPanel
+ 
+ /**
+- * Renders the "Python Packages" tool-window title with the active interpreter path appended in
+- * a lighter (context-help) foreground. The path start-ellipsizes when the header is too narrow
+- * to fit it in full — the tail (`.venv/bin/python`) is what distinguishes environments, so the
+- * leading directories are the ones that give way.
++ * Exposes "Python Packages" (bold) + interpreter path (light "context-help" foreground) as a
++ * title action, so the platform renders it inline in the tool window header alongside the other
++ * header buttons — no tab-chip background, no stripe-tooltip pollution.
+  *
+- * The renderer piggybacks on the fact that the platform id-label is a plain `JLabel`; wrapping
+- * the pieces in HTML with inline styles keeps everything inside the label the platform already
+- * paints, so we avoid custom components on the header.
++ * `stripeTitle` is unfit to carry the path: it doubles as the stripe-button tooltip source and
++ * `HelpTooltip.setPlainTextTitle` XML-escapes it, so HTML markup and the full path would leak
++ * into the hover tooltip. Using `setTitle` (content tab title) forces the platform to paint a
++ * tab-chip background around the text. A [CustomComponentAction] sidesteps both: the component
++ * lives in the header actions row without any tab decoration, and `stripeTitle` stays pinned to
++ * the plain "Python Packages" for a clean tooltip.
+  *
+- * The renderer is EDT-affine — call [update] whenever the active SDK changes and [refit] on
+- * tool-window resize (or let a caller invoke [refit] directly from a component listener). If
+- * the tool window is not resolvable (test environments, disposed project), calls become no-ops.
++ * The path start-ellipsizes to the tail (`.venv/bin/python`) — leading directories yield first
++ * because environment identity lives in the trailing directory.
+  */
+ internal class PyInterpreterHeaderTitleRenderer(
+   private val toolWindow: ToolWindow,
+   @Nls private val plainTitle: String,
+ ) {
++  init {
++    if (toolWindow.stripeTitle != plainTitle) {
++      toolWindow.stripeTitle = plainTitle
++    }
++  }
++
++  private val pathLabel: JBLabel = JBLabel("").apply {
++    foreground = UIUtil.getContextHelpForeground()
++    isVisible = false
++  }
++
++  // Bold "Python Packages" is already drawn by the platform id-label to the left; the header
++  // action only contributes the light-gray interpreter path so the two together read as
++  // "Python Packages …/path" without repeating the title. The trailing empty inset matches the
++  // platform's inter-action horizontal gap so the path does not butt up against the anchor
++  // toggle button that follows it in the actions row.
++  private val component: JComponent = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
++    isOpaque = false
++    border = JBUI.Borders.emptyRight(JBUI.CurrentTheme.ActionsList.elementIconGap())
++    add(pathLabel)
++  }
++
++  /**
++   * The `CustomComponentAction` that hosts the header component. Register via
++   * `toolWindow.setTitleActions(listOf(headerAction, …))`; the platform creates the component
++   * once through [CustomComponentAction.createCustomComponent] and reuses the same instance for
++   * the lifetime of the toolbar.
++   */
++  val headerAction: AnAction = object : AnAction(), CustomComponentAction {
++    override fun createCustomComponent(presentation: Presentation, place: String): JComponent = component
++    override fun actionPerformed(e: AnActionEvent) {}
++    override fun update(e: AnActionEvent) {
++      e.presentation.isEnabledAndVisible = true
++    }
++    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
++  }
++
+   private var currentPath: String? = null
++  private var lastRendered: String? = null
+ 
+   @RequiresEdt
+   fun update(path: String?) {
+     currentPath = path?.takeIf { it.isNotEmpty() }
++    // Always expose the full path via tooltip so the user can inspect the venv name / directory
++    // even when the header ellipsizes it or hides it entirely on a narrow tool window (PY-91321).
++    // Sat on both the label and its wrapper — an invisible JLabel does not fire tooltip events,
++    // so the wrapper carries the tooltip while the header collapses the visible slice.
++    pathLabel.toolTipText = currentPath
++    (component as JPanel).toolTipText = currentPath
+     refit()
+   }
+ 
+@@ -43,40 +95,54 @@ internal class PyInterpreterHeaderTitleRenderer(
+   fun refit() {
+     val path = currentPath
+     if (path == null) {
+-      toolWindow.stripeTitle = plainTitle
++      if (pathLabel.isVisible) pathLabel.isVisible = false
++      pathLabel.toolTipText = null
++      (component as JPanel).toolTipText = null
++      lastRendered = null
+       return
+     }
+-    toolWindow.stripeTitle = renderHtml(fitPathToHeader(path))
++    val fitted = fitPathToBar(path)
++    val text = if (fitted.isEmpty() || fitted.trim().length <= 2) " " else fitted
++    if (text == lastRendered && pathLabel.isVisible) return
++    lastRendered = text
++    pathLabel.text = text
++    pathLabel.isVisible = true
++    component.revalidate()
++    component.repaint()
+   }
+ 
+-  private fun fitPathToHeader(path: String): @NlsSafe String {
++  private fun fitPathToBar(path: String): @NlsSafe String {
+     val width = toolWindow.component.width.takeIf { it > 0 } ?: return path
+-    val font = UIUtil.getLabelFont()
++    val pathFont = pathLabel.font
++    val titleFont = pathFont.deriveFont(java.awt.Font.BOLD)
+     val budget = (width
+-                  - GraphicsUtil.stringWidth(plainTitle, font.deriveFont(Font.BOLD))
+-                  - GraphicsUtil.stringWidth("  ", font)
+-                  - RIGHT_TOOLBAR_RESERVED_PX
++                  - GraphicsUtil.stringWidth(plainTitle, titleFont)
++                  - HEADER_RIGHT_RESERVED_PX
+                  ).coerceAtLeast(0)
++    if (budget < MIN_READABLE_WIDTH_PX) return ""
+     return shortenTextWithEllipsis(
+       text = path,
+       minTextPrefixLength = 0,
+       minTextSuffixLength = 1,
+       maxTextPrefixRatio = 0f,
+       maxTextWidth = budget,
+-      getTextWidth = { GraphicsUtil.stringWidth(it, font) },
++      getTextWidth = { GraphicsUtil.stringWidth(it, pathFont) },
+       useEllipsisSymbol = true,
+     )
+   }
+ 
+-  private fun renderHtml(fittedPath: @NlsSafe String): @Nls String {
+-    val greyHex = ColorUtil.toHtmlColor(UIUtil.getContextHelpForeground())
+-    val title = HtmlChunk.text(plainTitle).bold()
+-    val path = HtmlChunk.text(fittedPath).wrapWith(HtmlChunk.span("font-weight:normal;color:$greyHex"))
+-    return HtmlChunk.html().children(title, HtmlChunk.nbsp(2), path).toString()
+-  }
+-
+   companion object {
+-    /** Width of the right-side header toolbar (3 action buttons and spaces). */
+-    private val RIGHT_TOOLBAR_RESERVED_PX: Int get() = 5 * ActionToolbar.DEFAULT_MINIMUM_BUTTON_SIZE.width
++    /**
++     * Width the platform reserves on the right of the header for the anchor toggle,
++     * the gear popup, and the hide button.
++     */
++    private val HEADER_RIGHT_RESERVED_PX = 5 * ActionToolbar.DEFAULT_MINIMUM_BUTTON_SIZE.width +
++              2 * JBUI.CurrentTheme.ActionsList.elementIconGap()
++
++    /**
++     * Below this budget every rendered slice degenerates to just the ellipsis symbol, so the
++     * label is hidden entirely instead.
++     */
++    private val MIN_READABLE_WIDTH_PX: Int = 2 * ActionToolbar.DEFAULT_MINIMUM_BUTTON_SIZE.width
+   }
+ }
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingToolWindowPanel.kt b/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingToolWindowPanel.kt
+index e526702f27a2..9680a0beb386 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingToolWindowPanel.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingToolWindowPanel.kt
+@@ -97,6 +97,7 @@ internal class PyPackagingToolWindowPanel(private val project: Project) : Simple
+     contentPanel = PyPackagesUiComponents.borderPanel {
+       add(createContentPanel(), BorderLayout.CENTER)
+     }
++    contentPanel.background = JBUI.CurrentTheme.ToolWindow.background()
+     setContent(contentPanel)
+     setupToolWindowTitleActions()
+     rebuildCenterLayout()
+@@ -131,12 +132,14 @@ internal class PyPackagingToolWindowPanel(private val project: Project) : Simple
+     toolWindow.component.putClientProperty(ToolWindowContentUi.DONT_HIDE_TOOLBAR_IN_HEADER, true)
+     val gearActions = ActionManager.getInstance().getAction(ADDITIONAL_PACKAGE_TOOLBAR_ACTION_ID) as ActionGroup
+     toolWindow.setAdditionalGearActions(gearActions)
+-    toolWindow.setTitleActions(listOf(PyTogglePackagingToolWindowAnchorAction()))
+-
+     headerTitleRenderer = PyInterpreterHeaderTitleRenderer(
+       toolWindow = toolWindow,
+       plainTitle = message("toolwindow.stripe.Python_Packages_Tool"),
+     )
++    toolWindow.setTitleActions(listOfNotNull(
++      headerTitleRenderer?.headerAction,
++      PyTogglePackagingToolWindowAnchorAction(),
++    ))
+     addComponentListener(object : ComponentAdapter() {
+       override fun componentResized(e: ComponentEvent) {
+         SwingUtilities.invokeLater { headerTitleRenderer?.refit() }
+@@ -163,7 +166,7 @@ internal class PyPackagingToolWindowPanel(private val project: Project) : Simple
+     lastIsHorizontal = horizontal
+     centerSlot.removeAll()
+     if (horizontal) {
+-      val splitter = OnePixelSplitter(false, "py.packages.tool.window.splitter", 0.55f).apply {
++      val splitter = OnePixelSplitter(false, "py.packages.tool.window.splitter.v2", 0.3f).apply {
+         firstComponent = listWithSearchPanel
+         secondComponent = infoPanel.component
+       }
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingToolWindowService.kt b/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingToolWindowService.kt
+index 300cea899a34..5c1173020f64 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingToolWindowService.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingToolWindowService.kt
+@@ -114,12 +114,16 @@ internal class PyPackagingToolWindowService(val project: Project, val serviceSco
+   private val invalidRepositories: List<PyInvalidRepositoryViewData>
+     get() = service<PyPackageRepositories>().invalidRepositories.filter { it.enabled }.map(::PyInvalidRepositoryViewData)
+ 
++  init {
++    subscribeToChanges()
++  }
++
+   fun initialize(toolWindowPanel: PyPackagingToolWindowPanel) {
+     this.toolWindowPanel = toolWindowPanel
+     serviceScope.launch(Dispatchers.IO) {
+-      initForSdk(readAction { project.modules.firstNotNullOfOrNull { it.pythonSdk } })
++      val sdk = currentSdk ?: readAction { project.modules.firstNotNullOfOrNull { it.pythonSdk } }
++      initForSdk(sdk)
+     }
+-    subscribeToChanges()
+   }
+ 
+   suspend fun detailsForPackage(selectedPackage: DisplayablePackage): PythonPackageDetails? {
+@@ -428,6 +432,10 @@ internal class PyPackagingToolWindowService(val project: Project, val serviceSco
+     ApplicationManager.getApplication().messageBus.connect(serviceScope)
+       .subscribe(PySdkListener.TOPIC, object : PySdkListener {
+         override fun moduleSdkUpdated(module: Module, prevSdk: Sdk?, newSdk: Sdk?) {
++          // `PySdkListener` fires on the application bus, so every open project's service is
++          // notified. Ignore modules that don't belong to *this* project — otherwise creating a
++          // venv in project B repoints project A's PPTW to that venv (PY-91324).
++          if (module.project != project) return
+           if (newSdk != null && newSdk == currentSdk) return
+           serviceScope.launch(Dispatchers.IO) {
+             initForSdk(newSdk)
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingTreeView.kt b/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingTreeView.kt
+index 6dcaa75176f4..fe98f358454a 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingTreeView.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/PyPackagingTreeView.kt
+@@ -268,10 +268,33 @@ internal class PyPackagingTreeView(
+     newTreeGroup.addTo(uninstalledContainerPanel)
+     newTree.addTreeSelectionListener {
+       syncTreeSelection(newTree)
++      maybePrefetchMore(newTree)
+     }
+     synchronizeScrollPaneSize()
+   }
+ 
++  /**
++   * Prefetches the next page as soon as selection lands on (or near) the last row and more
++   * results are available. Works regardless of input source — keyboard, trackpad, or the outer
++   * scroll bar — so `DOWN`, `PAGE_DOWN`, `END`, and mouse-wheel-driven wrap-around all trigger
++   * pagination through the same path (PY-90501). No key-code branching: the tree does not
++   * need to know which action moved the selection.
++   */
++  private fun maybePrefetchMore(tree: PyPackagesTree) {
++    if (isLoadingMore) return
++    if (tree.pendingMore <= 0) return
++    val row = tree.selectionRows?.firstOrNull() ?: return
++    if (row < tree.rowCount - 1) return
++    isLoadingMore = true
++    try {
++      tree.loadMore()
++      synchronizeScrollPaneSize()
++    }
++    finally {
++      isLoadingMore = false
++    }
++  }
++
+   private var scrollLoaderInstalled: Boolean = false
+   private var isLoadingMore: Boolean = false
+ 
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/actions/PyTogglePackagingToolWindowAnchorAction.kt b/python/src/com/jetbrains/python/packaging/toolwindow/actions/PyTogglePackagingToolWindowAnchorAction.kt
+index 436ab79b52e4..9f1f7cb0df26 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/actions/PyTogglePackagingToolWindowAnchorAction.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/actions/PyTogglePackagingToolWindowAnchorAction.kt
+@@ -2,6 +2,7 @@
+ package com.jetbrains.python.packaging.toolwindow.actions
+ 
+ import com.intellij.icons.AllIcons
++import com.intellij.ide.actions.ToolWindowMoveAction
+ import com.intellij.openapi.actionSystem.ActionUpdateThread
+ import com.intellij.openapi.actionSystem.AnActionEvent
+ import com.intellij.openapi.project.DumbAwareAction
+@@ -21,7 +22,7 @@ internal class PyTogglePackagingToolWindowAnchorAction : DumbAwareAction() {
+     }
+     e.presentation.isEnabledAndVisible = true
+     val (icon, text) = if (toolWindow.anchor == ToolWindowAnchor.RIGHT) {
+-      AllIcons.Actions.MoveToBottomRight to PyBundle.message("python.toolwindow.packages.move.to.bottom.action")
++      AllIcons.Actions.MoveToBottomLeft to PyBundle.message("python.toolwindow.packages.move.to.bottom.action")
+     }
+     else {
+       AllIcons.Actions.MoveToRightBottom to PyBundle.message("python.toolwindow.packages.move.to.right.action")
+@@ -32,8 +33,13 @@ internal class PyTogglePackagingToolWindowAnchorAction : DumbAwareAction() {
+ 
+   override fun actionPerformed(e: AnActionEvent) {
+     val toolWindow = findToolWindow(e) ?: return
+-    val target = if (toolWindow.anchor == ToolWindowAnchor.RIGHT) ToolWindowAnchor.BOTTOM else ToolWindowAnchor.RIGHT
+-    toolWindow.setAnchor(target, null)
++    val target = if (toolWindow.anchor == ToolWindowAnchor.RIGHT) {
++      ToolWindowMoveAction.Anchor.BottomLeft
++    }
++    else {
++      ToolWindowMoveAction.Anchor.RightBottom
++    }
++    target.applyTo(toolWindow)
+   }
+ 
+   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackageDescriptionController.kt b/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackageDescriptionController.kt
+index b3eb70e778f9..3dcafadd1a15 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackageDescriptionController.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackageDescriptionController.kt
+@@ -235,7 +235,7 @@ internal class PyPackageDescriptionController(
+ 
+   private val component = PyPackagesUiComponents.borderPanel {
+     add(PyPackagesUiComponents.borderPanel {
+-      border = SideBorder(JBColor.GRAY, SideBorder.BOTTOM)
++      border = SideBorder(JBColor.border(), SideBorder.BOTTOM)
+       leftPanel.border = BorderFactory.createEmptyBorder(0, 10, 0, 0)
+       rightPanel.border = BorderFactory.createEmptyBorder(0, 0, 0, 10)
+ 
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackageInfoPanel.kt b/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackageInfoPanel.kt
+index a25405f41830..73a6f1187525 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackageInfoPanel.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackageInfoPanel.kt
+@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
+ import com.intellij.ui.AnimatedIcon
+ import com.intellij.ui.SimpleTextAttributes
+ import com.intellij.ui.components.JBPanelWithEmptyText
++import com.intellij.util.ui.JBUI
+ import com.jetbrains.python.PyBundle.message
+ import com.jetbrains.python.packaging.toolwindow.PyPackagingToolWindowService
+ import com.jetbrains.python.packaging.toolwindow.model.DependencyGroupNode
+@@ -69,15 +70,18 @@ internal class PyPackageInfoPanel(
+   private val noPackagePanel = JBPanelWithEmptyText().apply {
+     emptyText.text = message("python.toolwindow.packages.description.panel.placeholder")
+     emptyText.setShowAboveCenter(false)
++    background = JBUI.CurrentTheme.ToolWindow.background()
+   }
+   private val loadingPanel = JBPanelWithEmptyText().apply {
+     emptyText.appendLine(AnimatedIcon.Default.INSTANCE, message("python.toolwindow.packages.description.panel.loading"), SimpleTextAttributes.SIMPLE_CELL_ATTRIBUTES, null)
+     emptyText.setShowAboveCenter(false)
++    background = JBUI.CurrentTheme.ToolWindow.background()
+   }
+ 
+   private var updateJob: Job? = null
+ 
+   val component: JPanel = JPanel(BorderLayout()).apply {
++    background = JBUI.CurrentTheme.ToolWindow.background()
+     add(noPackagePanel, BorderLayout.CENTER)
+   }
+ 
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackagingJcefHtmlPanel.kt b/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackagingJcefHtmlPanel.kt
+index e6dd2cea7952..989e3b6ccfbe 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackagingJcefHtmlPanel.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/details/PyPackagingJcefHtmlPanel.kt
+@@ -7,7 +7,10 @@ import com.intellij.ide.ui.LafManagerListener
+ import com.intellij.ide.ui.laf.UIThemeLookAndFeelInfo
+ import com.intellij.openapi.project.Project
+ import com.intellij.openapi.util.NlsSafe
++import com.intellij.ui.ColorUtil
+ import com.intellij.ui.jcef.JCEFHtmlPanel
++import com.intellij.util.ui.JBUI
++import com.intellij.util.ui.UIUtil
+ import java.io.IOException
+ import java.nio.charset.StandardCharsets
+ import java.util.concurrent.atomic.AtomicInteger
+@@ -46,7 +49,20 @@ internal class PyPackagingJcefHtmlPanel(project: Project) : JCEFHtmlPanel(unique
+     setOpenLinksInExternalBrowser(true)
+   }
+ 
+-  override fun prepareHtml(html: String): String = html.replaceFirst("<head>", "<head>$cssStyleCodeToInject")
++  /**
++   * Overrides body background/foreground so the JCEF pane matches the surrounding tool-window
++   * background instead of a hardcoded `#f7f8fa` / `#2b2d30` from the theme CSS file. Computed at
++   * inject time (not cached) so LaF changes are reflected on the next [setHtml] call.
++   */
++  private val bodyColorOverride: String
++    get() {
++      val bg = ColorUtil.toHtmlColor(JBUI.CurrentTheme.ToolWindow.background())
++      val fg = ColorUtil.toHtmlColor(UIUtil.getLabelForeground())
++      return "<style>body { background-color: $bg; color: $fg; }</style>"
++    }
++
++  override fun prepareHtml(html: String): String =
++    html.replaceFirst("<head>", "<head>$cssStyleCodeToInject$bodyColorOverride")
+ 
+   override fun setHtml(html: String) {
+     myLastHtml = html
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/marker/PyDependencyGroupInlayHintsProvider.kt b/python/src/com/jetbrains/python/packaging/toolwindow/marker/PyDependencyGroupInlayHintsProvider.kt
+index b40ad20f0c78..55fd56f90ea9 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/marker/PyDependencyGroupInlayHintsProvider.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/marker/PyDependencyGroupInlayHintsProvider.kt
+@@ -21,6 +21,9 @@ import com.intellij.python.pyproject.PY_PROJECT_TOML
+ import com.intellij.python.pyproject.PyProjectToml
+ import com.intellij.python.pyproject.dependencies.spi.resolveDependencyGroupName
+ import com.intellij.openapi.application.EDT
++import com.intellij.openapi.application.readAction
++import com.intellij.openapi.components.service
++import com.jetbrains.python.packaging.toolwindow.PyPackagingToolWindowService
+ import com.jetbrains.python.packaging.utils.PyPackageCoroutine
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.withContext
+@@ -107,6 +110,15 @@ internal class PyDependencyGroupInlayHintsProvider : InlayHintsProvider<NoSettin
+                                 ?.let { PyProjectToml.parseCached(project, it) }
+                                 ?.project?.name
+                               ?: module.name
++          // Bind the packaging service to the *clicked* module's SDK before the dialog opens.
++          // Without this, the dialog falls back to `findFirstPythonSdk()`, which in a multi-project
++          // workspace (e.g. poetry subprojects) may pick the wrong SDK — or the service may still
++          // be uninitialized, in which case the install click silently no-ops because
++          // `packagingService.currentSdk` is null (PY-91300).
++          val moduleSdk = readAction { PythonSdkUtil.findPythonSdk(module) }
++          if (moduleSdk != null) {
++            project.service<PyPackagingToolWindowService>().initForSdk(moduleSdk)
++          }
+           withContext(Dispatchers.EDT) {
+             PyInstallPackageDialog(project).show(preselectModuleName = preselectName, preselectGroupName = groupName)
+           }
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/packages/tree/PyPackagesTree.kt b/python/src/com/jetbrains/python/packaging/toolwindow/packages/tree/PyPackagesTree.kt
+index 3de91dabab19..3663ef55bf46 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/packages/tree/PyPackagesTree.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/packages/tree/PyPackagesTree.kt
+@@ -437,8 +437,16 @@ internal class PyPackagesTree(
+     val from = items.size
+     val to = minOf(from + LOAD_MORE_PAGE, sorted.size)
+     if (from >= to) return
++    val previousSelection = selectionRows?.firstOrNull()
+     setItemsKeepingCache(sorted.subList(0, to))
+     pendingMore = (sorted.size - to).coerceAtLeast(0)
++    if (previousSelection != null) {
++      val next = (previousSelection + 1).coerceAtMost(rowCount - 1)
++      if (next >= 0) {
++        setSelectionRow(next)
++        scrollRowToVisible(next)
++      }
++    }
+   }
+ 
+   private fun setItemsKeepingCache(value: List<DisplayablePackage>) {
+diff --git a/python/src/com/jetbrains/python/packaging/toolwindow/ui/PyInstallPackageDialog.kt b/python/src/com/jetbrains/python/packaging/toolwindow/ui/PyInstallPackageDialog.kt
+index ea0648cf13fb..5a6988a31bc9 100644
+--- a/python/src/com/jetbrains/python/packaging/toolwindow/ui/PyInstallPackageDialog.kt
++++ b/python/src/com/jetbrains/python/packaging/toolwindow/ui/PyInstallPackageDialog.kt
+@@ -121,6 +121,12 @@ internal class PyInstallPackageDialog(private val project: Project) : BigPopupUI
+   private var balloonFullSize: Dimension? = null
+   private var collapsedSize: Dimension? = null
+ 
++  /**
++   * Popup size captured immediately before the doc pane is opened. On close, the popup is
++   * restored to this size so the user's original layout is not lost (PY-91263).
++   */
++  private var sizeBeforeDescription: Dimension? = null
++
+   private var isOpeningFileBrowser = false
+ 
+   override fun createList(): JBList<Any> = resultsList.list
+@@ -368,6 +374,35 @@ internal class PyInstallPackageDialog(private val project: Project) : BigPopupUI
+     listOrDescContainer.add(center, BorderLayout.CENTER)
+     listOrDescContainer.revalidate()
+     listOrDescContainer.repaint()
++    if (::popup.isInitialized && !popup.isDisposed) {
++      applyDescriptionModeSize(showDescription)
++    }
++  }
++
++  private fun applyDescriptionModeSize(showDescription: Boolean) {
++    if (showDescription) {
++      val current = popup.size
++      if (sizeBeforeDescription == null) sizeBeforeDescription = Dimension(current)
++      val topLeft = popup.locationOnScreen
++      val screen = ScreenUtil.getScreenRectangle(topLeft)
++      val insets = popup.content.insets
++      val availableHeight = (screen.maxY.toInt() - topLeft.y).coerceAtLeast(current.height)
++      if (availableHeight > current.height) {
++        popup.size = Dimension(current.width, availableHeight)
++      }
++      val innerHeight = availableHeight - insets.top - insets.bottom
++      if (innerHeight > (balloonFullSize?.height ?: 0)) {
++        balloonFullSize = Dimension(current.width - insets.left - insets.right, innerHeight)
++      }
++    }
++    else {
++      sizeBeforeDescription?.let {
++        popup.size = it
++        val insets = popup.content.insets
++        balloonFullSize = Dimension(it.width - insets.left - insets.right, it.height - insets.top - insets.bottom)
++      }
++      sizeBeforeDescription = null
++    }
+   }
+ 
+   private fun ensureSdkInitialized() {
+diff --git a/python/src/com/jetbrains/python/sdk/uv/UvPackageManager.kt b/python/src/com/jetbrains/python/sdk/uv/UvPackageManager.kt
+index bc6c0710c8e6..964b8ffbe49b 100644
+--- a/python/src/com/jetbrains/python/sdk/uv/UvPackageManager.kt
++++ b/python/src/com/jetbrains/python/sdk/uv/UvPackageManager.kt
+@@ -154,24 +154,10 @@ internal class UvPackageManager internal constructor(
+     val workspaceTree = buildWorkspaceStructure(allTrees, declaredPackageNames)
+     if (workspaceTree != null) return workspaceTree
+ 
+-    val declaredPackages = extractDeclaredPackagesFromParsedTrees(allTrees, declaredPackageNames)
+-    val undeclaredPackages = extractUndeclaredPackages(declaredPackageNames)
+-    return PackageCollectionPackageStructureNode(declaredPackages, undeclaredPackages)
++    val undeclaredRoots = extractUndeclaredPackages(declaredPackageNames)
++    return buildNonWorkspacePackageStructure(allTrees, declaredPackageNames, undeclaredRoots)
+   }
+ 
+-  private fun extractDeclaredPackagesFromParsedTrees(
+-    allTrees: List<PackageTreeNode>,
+-    declaredPackageNames: Set<String>,
+-  ): List<PackageTreeNode> {
+-    val projectRoot = allTrees.firstOrNull()
+-                      ?: return declaredPackageNames.map { createLeafNode(it) }
+-    val childrenByName = projectRoot.children.associateBy { it.name.name }
+-    return declaredPackageNames.map { name -> childrenByName[name] ?: createLeafNode(name) }
+-  }
+-
+-  private fun createLeafNode(packageName: String): PackageTreeNode =
+-    PackageTreeNode(PyPackageName.from(packageName))
+-
+   private suspend fun buildWorkspaceStructure(
+     allTrees: List<PackageTreeNode>,
+     declaredPackageNames: Set<String>,
+@@ -189,7 +175,7 @@ internal class UvPackageManager internal constructor(
+ 
+     val shownPackageNames = collectAllPackageNames(rootTree, subMembers)
+     val undeclared = extractUndeclaredPackages(declaredPackageNames)
+-      .filter { it.name.name !in shownPackageNames }
++      .filter { it.name.name !in shownPackageNames && it.name.name !in allMemberNames }
+ 
+     return WorkspaceMemberPackageStructureNode(rootName, subMembers, rootTree, undeclared)
+   }
+@@ -395,3 +381,36 @@ internal class UvPackageManagerProvider : PythonPackageManagerProvider {
+     return UvPackageManager(project, sdk, uvExecutionContext)
+   }
+ }
++
++/**
++ * Builds the non-workspace package structure: keeps declared depth-1 dependencies with their
++ * transitive subtrees, and filters out any `uv pip tree` root that either matches a project root
++ * name or already appears inside a declared subtree (transitive of a declared package).
++ */
++@ApiStatus.Internal
++fun buildNonWorkspacePackageStructure(
++  allTrees: List<PackageTreeNode>,
++  declaredPackageNames: Set<String>,
++  undeclaredRoots: List<PackageTreeNode>,
++): PackageCollectionPackageStructureNode {
++  val rootProjectNames = allTrees.mapTo(mutableSetOf()) { it.name.name }
++  val declaredPackages = extractDeclaredPackagesFromParsedTrees(allTrees, declaredPackageNames)
++  val shownPackageNames = declaredPackages.flatMapTo(mutableSetOf()) { it.collectAllNames() }
++  val filtered = undeclaredRoots.filter {
++    it.name.name !in shownPackageNames && it.name.name !in rootProjectNames
++  }
++  return PackageCollectionPackageStructureNode(declaredPackages, filtered)
++}
++
++private fun extractDeclaredPackagesFromParsedTrees(
++  allTrees: List<PackageTreeNode>,
++  declaredPackageNames: Set<String>,
++): List<PackageTreeNode> {
++  val projectRoot = allTrees.firstOrNull()
++                    ?: return declaredPackageNames.map { createLeafNode(it) }
++  val childrenByName = projectRoot.children.associateBy { it.name.name }
++  return declaredPackageNames.map { name -> childrenByName[name] ?: createLeafNode(name) }
++}
++
++private fun createLeafNode(packageName: String): PackageTreeNode =
++  PackageTreeNode(PyPackageName.from(packageName))
+diff --git a/python/testSrc/com/jetbrains/python/sdk/uv/impl/UvTreeParsingTest.kt b/python/testSrc/com/jetbrains/python/sdk/uv/impl/UvTreeParsingTest.kt
+index 5cd4a2d5eb84..40f32333da5e 100644
+--- a/python/testSrc/com/jetbrains/python/sdk/uv/impl/UvTreeParsingTest.kt
++++ b/python/testSrc/com/jetbrains/python/sdk/uv/impl/UvTreeParsingTest.kt
+@@ -12,6 +12,7 @@ import com.jetbrains.python.packaging.packageRequirements.TreeParser
+ import com.jetbrains.python.packaging.packageRequirements.TreeParser.parseTrees
+ import com.jetbrains.python.packaging.packageRequirements.collectAllNames
+ import com.jetbrains.python.packaging.packageRequirements.extractDeclaredDependencies
++import com.jetbrains.python.sdk.uv.buildNonWorkspacePackageStructure
+ import org.assertj.core.api.Assertions.assertThat
+ import org.junit.jupiter.api.Nested
+ import org.junit.jupiter.api.Test
+@@ -744,4 +745,101 @@ class UvTreeParsingTest {
+       assertThat(TreeParser.isRootLine("")).isFalse()
+     }
+   }
++
++  @Nested
++  inner class NonWorkspaceUndeclaredFilter {
++
++    /**
++     * Reproduces PTW jupyter case: `jupyterlab` is the only declared dependency; all other packages
++     * are transitive deps of `jupyterlab`. Exercises the pure non-workspace branch of
++     * `UvPackageManager.getPackageTree` via [buildNonWorkspacePackageStructure].
++     */
++    private fun undeclaredNames(projectTreeOutput: String, pipTreeOutput: String): List<String> {
++      val allTrees = parseTrees(projectTreeOutput.lines())
++      val declaredPackageNames = extractDeclaredDependencies(allTrees).mapTo(mutableSetOf()) { it.name }
++      val undeclaredRoots = parseTrees(pipTreeOutput.lines())
++      val structure = buildNonWorkspacePackageStructure(allTrees, declaredPackageNames, undeclaredRoots)
++      return structure.undeclaredPackages.map { it.name.name }
++    }
++
++    @Test
++    fun `jupyter transitives of declared package are not marked undeclared`() {
++      val projectTree = """
++        jupyterproject v0.1.0
++        └── jupyterlab v4.6.2
++            ├── async-lru v2.3.0
++            ├── httpx v0.28.1
++            │   ├── anyio v4.14.2
++            │   │   └── idna v3.18
++            │   ├── certifi v2026.7.22
++            │   ├── httpcore v1.0.9
++            │   │   ├── certifi v2026.7.22
++            │   │   └── h11 v0.16.0
++            │   └── idna v3.18
++            ├── ipykernel v7.3.0
++            │   └── traitlets v5.15.1
++            ├── jinja2 v3.1.6
++            │   └── markupsafe v3.0.3
++            ├── packaging v26.2
++            ├── tornado v6.5.7
++            └── traitlets v5.15.1
++      """.trimIndent()
++
++      // `uv pip tree` roots include the project itself + a few transitives that no other installed
++      // package depends on (typical for jupyter installs — build backends, prompt helpers, etc.).
++      val pipTree = """
++        jupyterproject v0.1.0
++        └── jupyterlab v4.6.2
++        packaging v26.2
++        idna v3.18
++        markupsafe v3.0.3
++        setuptools v75.0.0
++      """.trimIndent()
++
++      val undeclared = undeclaredNames(projectTree, pipTree)
++
++      // jupyterproject (root) and jupyterlab (declared) are filtered.
++      // packaging, idna, markupsafe are transitives of jupyterlab -> filtered too.
++      // setuptools is truly undeclared (not in project tree) -> remains.
++      assertThat(undeclared).containsExactly("setuptools")
++    }
++
++    @Test
++    fun `simple project without transitives keeps unrelated pip tree roots`() {
++      val projectTree = """
++        myapp v1.0.0
++        └── requests v2.31.0
++            └── urllib3 v2.1.0
++      """.trimIndent()
++
++      val pipTree = """
++        myapp v1.0.0
++        └── requests v2.31.0
++        urllib3 v2.1.0
++        pip v24.0
++      """.trimIndent()
++
++      val undeclared = undeclaredNames(projectTree, pipTree)
++
++      // urllib3 is transitive of declared requests -> filtered; myapp is project root -> filtered.
++      assertThat(undeclared).containsExactly("pip")
++    }
++
++    @Test
++    fun `project root name itself is filtered from undeclared`() {
++      val projectTree = """
++        jupyterproject v0.1.0
++        └── jupyterlab v4.6.2
++      """.trimIndent()
++
++      val pipTree = """
++        jupyterproject v0.1.0
++        └── jupyterlab v4.6.2
++      """.trimIndent()
++
++      val undeclared = undeclaredNames(projectTree, pipTree)
++
++      assertThat(undeclared).isEmpty()
++    }
++  }
+ }

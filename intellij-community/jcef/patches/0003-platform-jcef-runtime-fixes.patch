@@ -1,0 +1,1716 @@
+# JCEF/CEF changes: Platform JCEF runtime fixes
+# Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
+# Apply with: git apply 0003-platform-jcef-runtime-fixes.patch
+#
+#   6131d90e76b23ba21cdf728aeafa640b0a79c5cf 2026-04-19 Artem Bochkarev | IJPL-231717 Don't set new CefAppHandler before jcef restart
+#   1dd73654b7da34d16336480430c1815a476aa05c 2026-04-19 Artem Bochkarev | IJPL-242830 Check whether CEF version was updated
+#   d7d8ffb3698a7ac582e5baf2044dffb9b10ef03f 2026-04-22 Vladimir Kharitonov | IJPL-231223 [jcef] AboutDialog: fix JBR with JCEF version format
+#   3ec1c4fc6f2040027bb1aa0f91fb6922a23e7b15 2026-04-27 Vladimir Kharitonov | IJPL-224692 [jcef] allow sandbox on mac for out-of-process
+#   d0ce76efee442bcba399b19a574e7ce0483cb245 2026-04-27 Vladimir Kharitonov | IJPL-224692 [jcef] prioritize JBCefDefaultNativeBundleProvider
+#   b29db5f88206e33456d20f8dcd532b80906dc586 2026-04-29 Yuriy Artamonov | [jcef] IJPL-243323 JCEF is enabled in plugins, but IDE behaves as if it is unavailable in RD
+#   f71f3c90ddde07648486be01341a0a0b8f1e1b3d 2026-05-06 Artem.Bukhonov | IJPL-244340 restore macOS in-process JCEF startup with bundled JBR
+#   b87fbfdb22993b8f6b3fbf56f25fec94b41160da 2026-05-18 Vladimir Kharitonov | IJPL-243940 [jcef] run jcef with --ozone-platform=x11 on wayland
+#   990bf9faa33283eceaff777e59b15fe2845a590d 2026-06-11 Vladimir Krivosheev | IJPL-247041 make Web Browser action available in RemDev
+#   e3db588246bb5a979fecee20d1a839699f13bc9c 2026-06-29 Yuriy Artamonov | [plugins] IJPL-247121 Incorrect suggestion to update JetBrains OS Integration/Web Browser (JCEF) plugins
+#   75d2ba295445db76e214927ac59d1509b673aeb0 2026-07-03 Yuriy Artamonov | [plugins] IJPL-247121 Incorrect suggestion to update JetBrains OS Integration/Web Browser (JCEF) plugins
+#
+diff --git a/platform/ui.jcef/jcef/JBCefApp.java b/platform/ui.jcef/jcef/JBCefApp.java
+index c2cf717c0a41..4daa94d8d9e7 100644
+--- a/platform/ui.jcef/jcef/JBCefApp.java
++++ b/platform/ui.jcef/jcef/JBCefApp.java
+@@ -255,7 +255,6 @@ public final class JBCefApp {
+     final String logPath = PathManager.getLogPath() + Platform.current().fileSeparator + "jcef_" + ProcessHandle.current().pid() + "_i" + CEFAPP_INSTANCE_COUNT.get() + ".log";
+     CefLog.init(logPath, myCefSettings.log_severity);
+ 
+-    CefApp.addAppHandler(new MyCefAppHandler(myCefArgs, true));
+     final CefApp newInstance = CefApp.getInstance(myCefArgs, myCefSettings, myServerExe);
+     if (newInstance == null) {
+       LOG.error("JCEF wasn't restarted (new instance is null).");
+diff --git a/platform/platform-api/resources/messages/IdeBundle.properties b/platform/platform-api/resources/messages/IdeBundle.properties
+index dbd360edbaa4..cf13d0f40969 100644
+--- a/platform/platform-api/resources/messages/IdeBundle.properties
++++ b/platform/platform-api/resources/messages/IdeBundle.properties
+@@ -2681,6 +2681,9 @@ notification.content.jcef.enable.browser.dialog.message=<html>\
+   <a href="https://youtrack.jetbrains.com/articles/JBR-A-11">Learn more\u2026</a>\
+   </html>
+ 
++notification.content.jcef.clearcache.title=Failed to clear JCEF caches automatically.
++notification.content.jcef.clearcache.message=JCEF version was updated. It is better to clear jcef cache folder (otherwise jcef may work unstably): {0}.
++
+ notification.title.jcef.measureFPS=OSR JCEF FPS Meter
+ notification.content.jcef.measureFPS=Press any key or switch focus to stop
+ action.jcef.restart=Restart
+@@ -3291,4 +3294,4 @@ universal.file.chooser.location.project=Project
+ universal.file.chooser.locations.group=Locations
+ universal.file.chooser.action.delete.text=Delete
+ universal.file.chooser.action.delete.description=Delete the selected file or directory
+-universal.file.chooser.action.delete.confirm=Delete \u201c{0}\u201d?
++universal.file.chooser.action.delete.confirm=Delete \u201C{0}\u201D?
+diff --git a/platform/ui.jcef/jcef/JBCefApp.java b/platform/ui.jcef/jcef/JBCefApp.java
+index 4daa94d8d9e7..0998da999b40 100644
+--- a/platform/ui.jcef/jcef/JBCefApp.java
++++ b/platform/ui.jcef/jcef/JBCefApp.java
+@@ -2,6 +2,7 @@
+ package com.intellij.ui.jcef;
+ 
+ import com.intellij.execution.Platform;
++import com.intellij.ide.util.PropertiesComponent;
+ import com.intellij.notification.NotificationGroup;
+ import com.intellij.openapi.Disposable;
+ import com.intellij.openapi.actionSystem.AnAction;
+@@ -14,6 +15,7 @@ import com.intellij.openapi.progress.Cancellation;
+ import com.intellij.openapi.util.Disposer;
+ import com.intellij.openapi.util.SystemInfo;
+ import com.intellij.openapi.util.Version;
++import com.intellij.openapi.util.io.NioFiles;
+ import com.intellij.openapi.util.registry.RegistryManager;
+ import com.intellij.ui.JreHiDpiUtil;
+ import com.intellij.ui.scale.DerivedScaleType;
+@@ -48,6 +50,7 @@ import java.io.File;
+ import java.io.IOException;
+ import java.net.URL;
+ import java.nio.file.Files;
++import java.nio.file.InvalidPathException;
+ import java.nio.file.Path;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+@@ -77,10 +80,15 @@ public final class JBCefApp {
+   private static final boolean SKIP_VERSION_CHECK = Boolean.getBoolean("ide.browser.jcef.skip_version_check");
+   private static final String REGISTRY_REMOTE_KEY = "ide.browser.jcef.out-of-process.enabled";
+ 
++  private static JCefVersionDetails VERSION_DETAILS = null;
+   private static final int MIN_SUPPORTED_CEF_MAJOR_VERSION = 119;
+   private static final int MIN_SUPPORTED_JCEF_API_MAJOR_VERSION = 1;
+   private static final int MIN_SUPPORTED_JCEF_API_MINOR_VERSION = 20;
+ 
++  private static final int    SETTINGS_CEF_VERSION_DEFAULT_VAL = 137;  // NOTE: this check is appeared when CEF 137 is used.
++  private static final String SETTINGS_CEF_VERSION_KEY = "cef_version_last_used";
++  private static final String SETTINGS_CEF_TEMP_CACHE_KEY = "cef_cleanup_temporary_cache_folder";
++
+   private static final String MIN_SUPPORTED_GLIBC_DEFAULT = "2.28.0";
+ 
+   private static final AtomicInteger CEFAPP_INSTANCE_COUNT = new AtomicInteger(0);
+@@ -184,6 +192,8 @@ public final class JBCefApp {
+       if (settings.log_severity != CefSettings.LogSeverity.LOGSEVERITY_DISABLE || settings.log_file != null || logPath != null)
+         LOG.info(String.format("JCEF logging: level=%s, file=%s, chromium_log=%s", settings.log_severity, logPath, settings.log_file));
+ 
++      checkCEFVersionUpdate(settings);
++
+       myCefArgs = args;
+       CefApp.addAppHandler(new MyCefAppHandler(args, trackGPUCrashes.get()));
+       myCefSettings = settings;
+@@ -230,6 +240,58 @@ public final class JBCefApp {
+     Disposer.register(ApplicationManager.getApplication(), myDisposable);
+   }
+ 
++  private static void checkCEFVersionUpdate(CefSettings settings) {
++    JCefVersionDetails version = getVersionDetails();
++    if (version == null) // NOTE: should always be FALSE (otherwise isSupported will return false and we won't execute JBCefApp ctor).
++      return;
++
++    final PropertiesComponent props = PropertiesComponent.getInstance();
++    final int cefVersionLast = props.getInt(SETTINGS_CEF_VERSION_KEY, SETTINGS_CEF_VERSION_DEFAULT_VAL);
++    final int cefVersionCurrent = version.cefVersion.major;
++    if (cefVersionCurrent != cefVersionLast) {
++      // NOTE: settings.cache_path is always not null
++      Path cache_path = Path.of(settings.cache_path);
++      Path tmp_cache_path = cache_path.getParent().resolve("jcef_cache_temp");
++      settings.cache_path = tmp_cache_path.toString();
++      LOG.info(String.format(
++        "JCEF: CEF version has been updated from %d to %d. Cache folder '%s' will be cleared in bg thread, CEF will be started with temporary cache folder '%s'",
++        cefVersionLast, cefVersionCurrent, cache_path, tmp_cache_path));
++
++      ApplicationManager.getApplication().executeOnPooledThread(() -> {
++        props.setValue(SETTINGS_CEF_VERSION_KEY, cefVersionCurrent, SETTINGS_CEF_VERSION_DEFAULT_VAL);
++        props.setValue(SETTINGS_CEF_TEMP_CACHE_KEY, tmp_cache_path.toString());
++
++        try {
++          NioFiles.deleteRecursively(cache_path);
++        } catch (IOException e) {
++          LOG.info(String.format("JCEF: Failed to delete cache folder '%s', error: %s", cache_path, e.getMessage()));
++          JBCefNotifications.showClearCache(cache_path);
++        }
++      });
++    } else {
++      final String tempCache = props.getValue(SETTINGS_CEF_TEMP_CACHE_KEY);
++      if (tempCache != null && !tempCache.isEmpty()) {
++        props.setValue(SETTINGS_CEF_TEMP_CACHE_KEY, null);
++        ApplicationManager.getApplication().executeOnPooledThread(() -> {
++          Path tmp = null;
++          try {
++            tmp = Path.of(tempCache);
++          } catch (InvalidPathException e) {
++            LOG.debug(String.format("JCEF: Invalid temporary cache path '%s', error: %s", tempCache, e.getMessage()));
++          }
++          if (tmp != null) {
++            try {
++              NioFiles.deleteRecursively(tmp);
++              LOG.info(String.format("JCEF: Deleted temporary cache folder '%s'", tempCache));
++            } catch (IOException e) {
++              LOG.info(String.format("JCEF: Failed to delete temporary cache folder '%s', error: %s", tempCache, e.getMessage()));
++            }
++          }
++        });
++      }
++    }
++  }
++
+   private boolean restartJCEF(boolean withVerboseLogging, boolean withNewCachePath) {
+     if (!myIsRemoteEnabled) {
+       return false;
+@@ -388,13 +450,10 @@ public final class JBCefApp {
+     }
+ 
+     if (!SKIP_VERSION_CHECK) {
+-      JCefVersionDetails version;
+-      try {
+-        version = JCefAppConfig.getVersionDetails();
+-      }
+-      catch (Throwable e) {
++      JCefVersionDetails version = getVersionDetails();
++      if (version == null)
+         return unsupported.apply("JCEF runtime version is not supported");
+-      }
++
+       if (MIN_SUPPORTED_CEF_MAJOR_VERSION > version.cefVersion.major) {
+         return unsupported.apply("JCEF: minimum supported CEF major version is " + MIN_SUPPORTED_CEF_MAJOR_VERSION +
+                                  ", current is " + version.cefVersion.major);
+@@ -411,6 +470,15 @@ public final class JBCefApp {
+     return isJcefFromJbr() || getNativeBundlePath() != null;
+   }
+ 
++  private static JCefVersionDetails getVersionDetails() {
++    if (VERSION_DETAILS == null) {
++      try {
++        VERSION_DETAILS = JCefAppConfig.getVersionDetails();
++      } catch (Throwable ignored) {}
++    }
++    return VERSION_DETAILS;
++  }
++
+   private static boolean isJcefFromJbr() {
+     URL url = JCefAppConfig.class.getResource("JCefAppConfig.class");
+     if (url == null) {
+diff --git a/platform/ui.jcef/jcef/JBCefNotifications.java b/platform/ui.jcef/jcef/JBCefNotifications.java
+index f052d0d72ec0..987b9eb4dc17 100644
+--- a/platform/ui.jcef/jcef/JBCefNotifications.java
++++ b/platform/ui.jcef/jcef/JBCefNotifications.java
+@@ -8,12 +8,14 @@ import com.intellij.notification.NotificationAction;
+ import com.intellij.notification.NotificationType;
+ import com.intellij.notification.Notifications;
+ import com.intellij.openapi.actionSystem.AnAction;
++import com.intellij.openapi.actionSystem.AnActionEvent;
+ import com.intellij.openapi.application.ApplicationManager;
+ import com.intellij.openapi.editor.Editor;
+ import com.intellij.openapi.util.registry.RegistryManager;
+ import com.intellij.ui.EditorNotificationPanel;
+ import com.intellij.ui.LightColors;
+ import org.jetbrains.annotations.Nls;
++import org.jetbrains.annotations.NotNull;
+ import org.jetbrains.annotations.Nullable;
+ 
+ import javax.swing.JComponent;
+@@ -22,6 +24,7 @@ import javax.swing.JPanel;
+ import java.awt.Component;
+ import java.awt.GridBagConstraints;
+ import java.awt.GridBagLayout;
++import java.nio.file.Path;
+ 
+ public final class JBCefNotifications {
+   public static @Nullable EditorNotificationPanel createEditorNotificationPanel(Editor editor, JBCefHealthMonitor.Status status) {
+@@ -88,6 +91,16 @@ public final class JBCefNotifications {
+     Notifications.Bus.notify(notification);
+   }
+ 
++  static void showClearCache(Path cachePath) {
++    // NOTE: called from pooled bg thread.
++    Notification notification = JBCefApp.getNotificationGroup().createNotification(
++      IdeBundle.message("notification.content.jcef.clearcache.title"),
++      IdeBundle.message("notification.content.jcef.clearcache.message", cachePath.toString()),
++      NotificationType.WARNING);
++
++    notification.notify(null);
++  }
++
+   private static JComponent createUnprivilegedUserNSStubPanel() {
+     return JBCefAppArmorUtils.getUnprivilegedUserNamespacesRestrictedStubPanel();
+   }
+diff --git a/platform/platform-impl/src/com/intellij/ide/actions/AboutDialog.java b/platform/platform-impl/src/com/intellij/ide/actions/AboutDialog.java
+index 2660b9fc3ab4..1ead6727081b 100644
+--- a/platform/platform-impl/src/com/intellij/ide/actions/AboutDialog.java
++++ b/platform/platform-impl/src/com/intellij/ide/actions/AboutDialog.java
+@@ -229,7 +229,7 @@ public final class AboutDialog extends DialogWrapper {
+     String jreJcefSuffix = jcefVersion != null && jcefNativeBundleVersion == null ? " (JCEF " + jcefVersion + ")" : "";
+ 
+     lines.add(jreInfo + jreJcefSuffix);
+-    myInfo.add(MessageFormat.format("Runtime version: {0} {1}", javaVersion, arch) + jcefVersion);
++    myInfo.add(MessageFormat.format("Runtime version: {0} {1}{2}", javaVersion, arch, jreJcefSuffix));
+ 
+     String vmVersion = properties.getProperty("java.vm.name", "unknown");
+     String vmVendor = properties.getProperty("java.vendor", "unknown");
+diff --git a/platform/ui.jcef/jcef/SettingsHelper.java b/platform/ui.jcef/jcef/SettingsHelper.java
+index 23ae608bd26f..7f24d3240deb 100644
+--- a/platform/ui.jcef/jcef/SettingsHelper.java
++++ b/platform/ui.jcef/jcef/SettingsHelper.java
+@@ -85,7 +85,7 @@ final class SettingsHelper {
+           LOG.info("JCEF-sandbox was disabled because java-process initialized without sandbox");
+           settings.no_sandbox = true;
+         }
+-      } else if (SystemInfoRt.isMac) {
++      } else if (SystemInfoRt.isMac && !config.isRemoteEnabled()) {
+         ProcessHandle.Info i = ProcessHandle.current().info();
+         Optional<String> processAppPath = i.command();
+         String appBundlePath = getMacAppBundlePath();
+diff --git a/platform/platform-resources/src/META-INF/PlatformExtensions.xml b/platform/platform-resources/src/META-INF/PlatformExtensions.xml
+index 99f0b68f337c..7a0588e372c3 100644
+--- a/platform/platform-resources/src/META-INF/PlatformExtensions.xml
++++ b/platform/platform-resources/src/META-INF/PlatformExtensions.xml
+@@ -221,7 +221,7 @@
+ 
+     <applicationService serviceImplementation="com.intellij.ui.jcef.JBCefStartup" preload="notHeadless" os="mac"/>
+     <cachesInvalidator implementation="com.intellij.ui.jcef.JBCefAppCacheInvalidator" order="last"/>
+-    <cefNativeBundleProvider implementation="com.intellij.ui.jcef.JBCefDefaultNativeBundleProvider" order="last"/>
++    <cefNativeBundleProvider implementation="com.intellij.ui.jcef.JBCefDefaultNativeBundleProvider" order="first"/>
+ 
+     <applicationService serviceInterface="com.intellij.ide.ui.IdeUiService"
+                         serviceImplementation="com.intellij.openapi.fileEditor.impl.IdeUiServiceImpl"/>
+diff --git a/.idea/modules.xml b/.idea/modules.xml
+index 33827d4b49ed..b2843f764da5 100644
+--- a/.idea/modules.xml
++++ b/.idea/modules.xml
+@@ -719,6 +719,7 @@
+       <module fileurl="file://$PROJECT_DIR$/plugins/javaFX/sceneBuilder/intellij.javaFX.sceneBuilder.iml" filepath="$PROJECT_DIR$/plugins/javaFX/sceneBuilder/intellij.javaFX.sceneBuilder.iml" />
+       <module fileurl="file://$PROJECT_DIR$/plugins/javaFX/intellij.javaFX.tests.iml" filepath="$PROJECT_DIR$/plugins/javaFX/intellij.javaFX.tests.iml" />
+       <module fileurl="file://$PROJECT_DIR$/platform/script-debugger/protocol/protocol-reader/intellij.javascript.protocolReader.iml" filepath="$PROJECT_DIR$/platform/script-debugger/protocol/protocol-reader/intellij.javascript.protocolReader.iml" />
++      <module fileurl="file://$PROJECT_DIR$/plugins/jcef/frontend/intellij.jcef.frontend.iml" filepath="$PROJECT_DIR$/plugins/jcef/frontend/intellij.jcef.frontend.iml" />
+       <module fileurl="file://$PROJECT_DIR$/plugins/jcef/plugin/intellij.jcef.plugin.iml" filepath="$PROJECT_DIR$/plugins/jcef/plugin/intellij.jcef.plugin.iml" />
+       <module fileurl="file://$PROJECT_DIR$/json/intellij.json.iml" filepath="$PROJECT_DIR$/json/intellij.json.iml" />
+       <module fileurl="file://$PROJECT_DIR$/json/backend/intellij.json.backend.iml" filepath="$PROJECT_DIR$/json/backend/intellij.json.backend.iml" />
+diff --git a/build/bazel-generated-file-list.txt b/build/bazel-generated-file-list.txt
+index 69b1b3e4ba58..061fbf7e84aa 100644
+--- a/build/bazel-generated-file-list.txt
++++ b/build/bazel-generated-file-list.txt
+@@ -1111,6 +1111,7 @@ plugins/javaFX/common
+ plugins/javaFX/community
+ plugins/javaFX/jps
+ plugins/javaFX/sceneBuilder
++plugins/jcef/frontend
+ plugins/jcef/plugin
+ plugins/jshell
+ plugins/jshell/console
+diff --git a/plugins/jcef/frontend/BUILD.bazel b/plugins/jcef/frontend/BUILD.bazel
+new file mode 100644
+index 000000000000..0601898fa1c9
+--- /dev/null
++++ b/plugins/jcef/frontend/BUILD.bazel
+@@ -0,0 +1,43 @@
++### auto-generated section `build intellij.jcef.frontend` start
++load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
++
++resourcegroup(
++  name = "frontend_resources",
++  srcs = glob(["resources/**/*"]),
++  strip_prefix = "resources"
++)
++
++jvm_library(
++  name = "frontend",
++  module_name = "intellij.jcef.frontend",
++  visibility = ["//visibility:public"],
++  srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
++  resources = [":frontend_resources"],
++  deps = [
++    "@lib//:kotlin-stdlib",
++    "//platform/platform-frontend:frontend",
++    "//platform/ui.jcef",
++    "//platform/core-impl",
++  ]
++)
++
++jvm_library(
++  name = "frontend_test_lib",
++  testonly = True,
++  module_name = "intellij.jcef.frontend",
++  visibility = ["//visibility:public"],
++  srcs = glob([], allow_empty = True),
++  runtime_deps = [
++    ":frontend",
++    "//platform/platform-frontend:frontend_test_lib",
++    "//platform/ui.jcef:ui.jcef_test_lib",
++    "//platform/core-impl:core-impl_test_lib",
++  ]
++)
++### auto-generated section `build intellij.jcef.frontend` end
++
++### auto-generated section `iml intellij.jcef.frontend` start
++exports_files([
++  "intellij.jcef.frontend.iml",
++], visibility = ["//visibility:public"])
++### auto-generated section `iml intellij.jcef.frontend` end
+\ No newline at end of file
+diff --git a/plugins/jcef/frontend/intellij.jcef.frontend.iml b/plugins/jcef/frontend/intellij.jcef.frontend.iml
+new file mode 100644
+index 000000000000..cfbeda69e4f0
+--- /dev/null
++++ b/plugins/jcef/frontend/intellij.jcef.frontend.iml
+@@ -0,0 +1,40 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<module type="JAVA_MODULE" version="4">
++  <component name="FacetManager">
++    <facet type="kotlin-language" name="Kotlin">
++      <configuration version="5" platform="JVM 25" allPlatforms="JVM [25]" useProjectSettings="false">
++        <compilerSettings>
++          <option name="additionalArguments" value="-Xjvm-default=all -XXLanguage:+AllowEagerSupertypeAccessibilityChecks -progressive" />
++        </compilerSettings>
++        <compilerArguments>
++          <stringArguments>
++            <stringArg name="jvmTarget" arg="25" />
++            <stringArg name="apiVersion" arg="2.3" />
++            <stringArg name="languageVersion" arg="2.3" />
++          </stringArguments>
++          <arrayArguments>
++            <arrayArg name="pluginClasspaths">
++              <args>
++                <arg>$KOTLIN_BUNDLED$/lib/kotlinx-serialization-compiler-plugin.jar</arg>
++                <arg>$MAVEN_REPOSITORY$/com/jetbrains/fleet/rpc-compiler-plugin/2.3.21-RC2-0.1/rpc-compiler-plugin-2.3.21-RC2-0.1.jar</arg>
++              </args>
++            </arrayArg>
++          </arrayArguments>
++        </compilerArguments>
++      </configuration>
++    </facet>
++  </component>
++  <component name="NewModuleRootManager" inherit-compiler-output="true">
++    <exclude-output />
++    <content url="file://$MODULE_DIR$">
++      <sourceFolder url="file://$MODULE_DIR$/resources" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" packagePrefix="com.intellij.jcef.frontend" />
++    </content>
++    <orderEntry type="inheritedJdk" />
++    <orderEntry type="sourceFolder" forTests="false" />
++    <orderEntry type="library" name="kotlin-stdlib" level="project" />
++    <orderEntry type="module" module-name="intellij.platform.frontend" />
++    <orderEntry type="module" module-name="intellij.platform.ui.jcef" />
++    <orderEntry type="module" module-name="intellij.platform.core.impl" />
++  </component>
++</module>
+\ No newline at end of file
+diff --git a/plugins/jcef/frontend/resources/intellij.jcef.frontend.xml b/plugins/jcef/frontend/resources/intellij.jcef.frontend.xml
+new file mode 100644
+index 000000000000..2f588651d294
+--- /dev/null
++++ b/plugins/jcef/frontend/resources/intellij.jcef.frontend.xml
+@@ -0,0 +1,11 @@
++<idea-plugin>
++  <dependencies>
++    <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
++    <module name="intellij.platform.frontend"/>
++    <!-- endregion -->
++  </dependencies>
++
++  <extensions defaultExtensionNs="com.intellij">
++    <cefNativeBundleProvider implementation="com.intellij.jcef.frontend.PluggableCefNativeBundleProvider"/>
++  </extensions>
++</idea-plugin>
+diff --git a/plugins/jcef/frontend/src/PluggableCefNativeBundleProvider.kt b/plugins/jcef/frontend/src/PluggableCefNativeBundleProvider.kt
+new file mode 100644
+index 000000000000..5be5c3fb562b
+--- /dev/null
++++ b/plugins/jcef/frontend/src/PluggableCefNativeBundleProvider.kt
+@@ -0,0 +1,14 @@
++package com.intellij.jcef.frontend
++
++import com.intellij.ide.plugins.getPluginDistDirByClass
++import com.intellij.ui.jcef.JBCefNativeBundleProvider
++import kotlin.io.path.absolutePathString
++
++internal class PluggableCefNativeBundleProvider : JBCefNativeBundleProvider {
++  override fun isAvailable(): Boolean = true
++
++  override fun getNativeBundlePath(): String? {
++    val distDir = getPluginDistDirByClass(javaClass)?.resolve("jcef")
++    return distDir?.absolutePathString()
++  }
++}
+diff --git a/plugins/jcef/plugin/BUILD.bazel b/plugins/jcef/plugin/BUILD.bazel
+index 08a806d2cce2..23abfe2ad982 100644
+--- a/plugins/jcef/plugin/BUILD.bazel
++++ b/plugins/jcef/plugin/BUILD.bazel
+@@ -11,14 +11,9 @@ jvm_library(
+   name = "plugin",
+   module_name = "intellij.jcef.plugin",
+   visibility = ["//visibility:public"],
+-  srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
++  srcs = glob([], allow_empty = True),
+   resources = [":plugin_resources"],
+-  deps = [
+-    "@lib//:kotlin-stdlib",
+-    "//platform/ui.jcef",
+-    "//platform/platform-impl:ide-impl",
+-    "//platform/core-impl",
+-  ]
++  runtime_deps = ["@lib//:kotlin-stdlib"]
+ )
+ 
+ jvm_library(
+@@ -27,12 +22,7 @@ jvm_library(
+   module_name = "intellij.jcef.plugin",
+   visibility = ["//visibility:public"],
+   srcs = glob([], allow_empty = True),
+-  runtime_deps = [
+-    ":plugin",
+-    "//platform/ui.jcef:ui.jcef_test_lib",
+-    "//platform/platform-impl:ide-impl_test_lib",
+-    "//platform/core-impl:core-impl_test_lib",
+-  ]
++  runtime_deps = [":plugin"]
+ )
+ ### auto-generated section `build intellij.jcef.plugin` end
+ 
+diff --git a/plugins/jcef/plugin/intellij.jcef.plugin.iml b/plugins/jcef/plugin/intellij.jcef.plugin.iml
+index 8f6733458046..475f2c1a4120 100644
+--- a/plugins/jcef/plugin/intellij.jcef.plugin.iml
++++ b/plugins/jcef/plugin/intellij.jcef.plugin.iml
+@@ -4,13 +4,9 @@
+     <exclude-output />
+     <content url="file://$MODULE_DIR$">
+       <sourceFolder url="file://$MODULE_DIR$/resources" type="java-resource" />
+-      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" packagePrefix="com.intellij.jcef.plugin" />
+     </content>
+     <orderEntry type="inheritedJdk" />
+     <orderEntry type="library" name="kotlin-stdlib" level="project" />
+     <orderEntry type="sourceFolder" forTests="false" />
+-    <orderEntry type="module" module-name="intellij.platform.ui.jcef" />
+-    <orderEntry type="module" module-name="intellij.platform.ide.impl" />
+-    <orderEntry type="module" module-name="intellij.platform.core.impl" />
+   </component>
+ </module>
+\ No newline at end of file
+diff --git a/plugins/jcef/plugin/plugin-content.yaml b/plugins/jcef/plugin/plugin-content.yaml
+index ecba7c3222bc..027d83cf6d36 100644
+--- a/plugins/jcef/plugin/plugin-content.yaml
++++ b/plugins/jcef/plugin/plugin-content.yaml
+@@ -1,3 +1,6 @@
+ - name: lib/jcef-plugin.jar
+   modules:
+-  - name: intellij.jcef.plugin
+\ No newline at end of file
++  - name: intellij.jcef.plugin
++- name: lib/modules/intellij.jcef.frontend.jar
++  contentModules:
++  - name: intellij.jcef.frontend
+\ No newline at end of file
+diff --git a/plugins/jcef/plugin/resources/META-INF/plugin.xml b/plugins/jcef/plugin/resources/META-INF/plugin.xml
+index aceb33d7d961..2fe767bf2e98 100644
+--- a/plugins/jcef/plugin/resources/META-INF/plugin.xml
++++ b/plugins/jcef/plugin/resources/META-INF/plugin.xml
+@@ -12,7 +12,7 @@
+     <plugin id="com.intellij.modules.platform"/>
+   </dependencies>
+ 
+-  <extensions defaultExtensionNs="com.intellij">
+-    <cefNativeBundleProvider implementation="com.intellij.jcef.plugin.PluggableCefNativeBundleProvider"/>
+-  </extensions>
++  <content>
++    <module name="intellij.jcef.frontend"/>
++  </content>
+ </idea-plugin>
+diff --git a/plugins/jcef/plugin/src/PluggableCefNativeBundleProvider.kt b/plugins/jcef/plugin/src/PluggableCefNativeBundleProvider.kt
+deleted file mode 100644
+index d15124fe9f82..000000000000
+--- a/plugins/jcef/plugin/src/PluggableCefNativeBundleProvider.kt
++++ /dev/null
+@@ -1,14 +0,0 @@
+-package com.intellij.jcef.plugin
+-
+-import com.intellij.ide.plugins.getPluginDistDirByClass
+-import com.intellij.ui.jcef.JBCefNativeBundleProvider
+-import kotlin.io.path.absolutePathString
+-
+-internal class PluggableCefNativeBundleProvider : JBCefNativeBundleProvider {
+-  override fun isAvailable(): Boolean = true
+-
+-  override fun getNativeBundlePath(): String? {
+-    val distDir = getPluginDistDirByClass(javaClass)?.resolve("jcef")
+-    return distDir?.absolutePathString()
+-  }
+-}
+diff --git a/platform/ui.jcef/jcef/JBCefApp.java b/platform/ui.jcef/jcef/JBCefApp.java
+index 63c0d58bb835..5e8aafdd4ad0 100644
+--- a/platform/ui.jcef/jcef/JBCefApp.java
++++ b/platform/ui.jcef/jcef/JBCefApp.java
+@@ -79,6 +79,14 @@ public final class JBCefApp {
+   private static final Logger LOG = Logger.getInstance(JBCefApp.class);
+   private static final boolean SKIP_VERSION_CHECK = Boolean.getBoolean("ide.browser.jcef.skip_version_check");
+   private static final String REGISTRY_REMOTE_KEY = "ide.browser.jcef.out-of-process.enabled";
++  private static final String FRAMEWORK_DIR_PATH_ARG = "--framework-dir-path=";
++  private static final String BROWSER_SUBPROCESS_PATH_ARG = "--browser-subprocess-path=";
++  private static final String MAIN_BUNDLE_PATH_ARG = "--main-bundle-path=";
++  private static final String MAC_APP_BUNDLE_SUFFIX = ".app";
++  private static final String MAC_APP_CONTENTS_DIR = "Contents";
++  private static final String MAC_APP_EXECUTABLES_DIR = "MacOS";
++  private static final String JCEF_HELPER_NAME = "jcef Helper";
++  private static final String JCEF_HELPER_APP_NAME = JCEF_HELPER_NAME + MAC_APP_BUNDLE_SUFFIX;
+ 
+   private static JCefVersionDetails VERSION_DETAILS = null;
+   private static final int MIN_SUPPORTED_CEF_MAJOR_VERSION = 119;
+@@ -158,6 +166,26 @@ public final class JBCefApp {
+     }
+     else {
+       CefApp.setIsRemoteEnabled(myIsRemoteEnabled);
++      String cefFrameworkPathOSX = config.getCefFrameworkPathOSX();
++      if (cefFrameworkPathOSX == null && OS.isMacintosh() && !myIsRemoteEnabled) {
++        List<String> appArgs = config.getAppArgsAsList();
++        for (String appArg : config.getAppArgsAsList()) {
++          if (appArg.startsWith(FRAMEWORK_DIR_PATH_ARG)) {
++            cefFrameworkPathOSX = appArg.substring(FRAMEWORK_DIR_PATH_ARG.length());
++            break;
++          }
++        }
++        if (cefFrameworkPathOSX != null) {
++          Path helperPath = Path.of(cefFrameworkPathOSX).getParent().resolve(JCEF_HELPER_APP_NAME);
++          Path browserSubprocessPath = helperPath.resolve(MAC_APP_CONTENTS_DIR).resolve(MAC_APP_EXECUTABLES_DIR).resolve(JCEF_HELPER_NAME);
++          if (Files.isRegularFile(browserSubprocessPath)) {
++            appArgs.removeIf(arg -> arg.startsWith(BROWSER_SUBPROCESS_PATH_ARG) || arg.startsWith(MAIN_BUNDLE_PATH_ARG));
++            appArgs.add(BROWSER_SUBPROCESS_PATH_ARG + browserSubprocessPath);
++            appArgs.add(MAIN_BUNDLE_PATH_ARG + helperPath);
++          }
++        }
++      }
++      final String macCefFrameworkPathOSX = cefFrameworkPathOSX;
+       if (myIsRemoteEnabled) {
+         final Supplier<CefRendering> defaultRenderingFactory = () -> {
+           JBCefOSRHandlerFactory osrHandlerFactory = JBCefOSRHandlerFactory.getInstance();
+@@ -173,9 +201,10 @@ public final class JBCefApp {
+       CefLog.init(logPath, settings.log_severity);
+ 
+       JBCefHealthMonitor.getInstance().performHealthCheckAsync(settings, () -> {
+-        if (OS.isMacintosh() && config.getCefFrameworkPathOSX() != null) {
+-          CefApp.startupAsync(config.getCefFrameworkPathOSX());
+-        } else {
++        if (OS.isMacintosh() && macCefFrameworkPathOSX != null) {
++          CefApp.startupAsync(macCefFrameworkPathOSX);
++        }
++        else {
+           CefApp.startup(ArrayUtil.EMPTY_STRING_ARRAY);
+         }
+       });
+diff --git a/platform/ui.jcef/jcef/SettingsHelper.java b/platform/ui.jcef/jcef/SettingsHelper.java
+index 7f24d3240deb..9569a3f886f8 100644
+--- a/platform/ui.jcef/jcef/SettingsHelper.java
++++ b/platform/ui.jcef/jcef/SettingsHelper.java
+@@ -205,6 +205,9 @@ final class SettingsHelper {
+     }
+ 
+     args = ArrayUtil.mergeArrays(args, "--autoplay-policy=no-user-gesture-required", "--disable-component-update");
++    if (SystemInfoRt.isLinux && !StringUtil.isEmptyOrSpaces(System.getenv("DISPLAY"))) {
++      args = ArrayUtil.mergeArrays(args, "--ozone-platform=x11");
++    }
+ 
+     return args;
+   }
+diff --git a/platform/platform-impl/internal/jcef/resources/intellij.internal.jcef.xml b/platform/platform-impl/internal/jcef/resources/intellij.internal.jcef.xml
+index 021bb239793a..c820da874f6f 100644
+--- a/platform/platform-impl/internal/jcef/resources/intellij.internal.jcef.xml
++++ b/platform/platform-impl/internal/jcef/resources/intellij.internal.jcef.xml
+@@ -7,7 +7,6 @@
+   <!-- endregion -->
+ 
+   <actions>
+-    <action id="WebBrowser" class="com.intellij.internal.jcef.JBCefBrowserDemo"/>
+     <action id="JBCefTestApp" class="com.intellij.internal.jcef.test.JBCefTestApp"/>
+     <action id="ShowGotItDemo" internal="true" class="com.intellij.internal.ui.ShowGotItDemoAction"/>
+     <action id="JBCefOsrMeasureFps" class="com.intellij.internal.jcef.JBCefOsrBrowserMeasureFpsAction"/>
+diff --git a/platform/platform-impl/internal/jcef/src/com/intellij/internal/jcef/CookieManagerDialog.java b/platform/platform-impl/internal/jcef/src/com/intellij/internal/jcef/CookieManagerDialog.java
+deleted file mode 100644
+index c7b3ab23b860..000000000000
+--- a/platform/platform-impl/internal/jcef/src/com/intellij/internal/jcef/CookieManagerDialog.java
++++ /dev/null
+@@ -1,132 +0,0 @@
+-// Copyright (c) 2014 The Chromium Embedded Framework Authors. All rights
+-// reserved. Use of this source code is governed by a BSD-style license that
+-// can be found in the LICENSE file.
+-package com.intellij.internal.jcef;
+-
+-import com.intellij.ui.jcef.JBCefBrowser;
+-import com.intellij.ui.jcef.JBCefCookie;
+-import com.intellij.ui.jcef.JBCefCookieManager;
+-import com.intellij.ui.table.JBTable;
+-import com.intellij.util.ui.JBDimension;
+-import org.jetbrains.annotations.NotNull;
+-
+-import javax.swing.BoxLayout;
+-import javax.swing.JButton;
+-import javax.swing.JDialog;
+-import javax.swing.JPanel;
+-import javax.swing.JScrollPane;
+-import javax.swing.JTable;
+-import javax.swing.table.AbstractTableModel;
+-import java.awt.BorderLayout;
+-import java.awt.Dimension;
+-import java.awt.Frame;
+-import java.awt.event.ActionEvent;
+-import java.awt.event.ActionListener;
+-import java.util.ArrayList;
+-import java.util.List;
+-
+-final class CookieManagerDialog extends JDialog {
+-  private static final String myTitle = "Cookie Manager";
+-  private static final String myDeleteCookiesButtonText = "Delete All Cookies";
+-  @SuppressWarnings("unused") private final JBCefBrowser myJBCefBrowser;
+-  private final JBCefCookieManager myJBCefCookieManager;
+-  private final CookieTableModel myTableModel = new CookieTableModel();
+-
+-  CookieManagerDialog(Frame owner, JBCefBrowser jbCefBrowser) {
+-    super(owner, myTitle, false);
+-    setLayout(new BorderLayout());
+-    setSize(JBDimension.size(new Dimension(800, 600)));
+-
+-    myJBCefBrowser = jbCefBrowser;
+-    myJBCefCookieManager = jbCefBrowser.getJBCefCookieManager();
+-    JTable cookieTable = new JBTable(myTableModel);
+-    cookieTable.setFillsViewportHeight(true);
+-    add(new JScrollPane(cookieTable));
+-
+-    JPanel controlPanel = new JPanel();
+-    controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.X_AXIS));
+-
+-    final JButton myDeleteCookiesButton = new JButton(myDeleteCookiesButtonText);
+-    myDeleteCookiesButton.addActionListener(new ActionListener() {
+-      @Override
+-      public void actionPerformed(ActionEvent e) {
+-        if (myJBCefCookieManager.deleteCookies(true)) {
+-          List<JBCefCookie> cookies = myJBCefCookieManager.getCookies();
+-          update(cookies);
+-        }
+-      }
+-    });
+-    controlPanel.add(myDeleteCookiesButton);
+-
+-    add(controlPanel, BorderLayout.SOUTH);
+-  }
+-
+-  public void update(List<? extends JBCefCookie> cefCookies) {
+-    myTableModel.clear();
+-    myTableModel.show(cefCookies);
+-  }
+-
+-  private static final class CookieTableModel extends AbstractTableModel {
+-    private final String[] columnNames =
+-      new String[]{"Name", "Value", "Domain", "Path", "Secure", "HTTP only", "Created", "Last Access", "Expires"};
+-    private final ArrayList<Object[]> rowData = new ArrayList<>();
+-
+-    private void show(@NotNull List<? extends JBCefCookie> cefCookies) {
+-      for (JBCefCookie cookie : cefCookies) {
+-        Object[] entry = {
+-          cookie.getName(),
+-          cookie.getValue(),
+-          cookie.getDomain(),
+-          cookie.getPath(),
+-          cookie.isSecure(),
+-          cookie.isHttpOnly(),
+-          cookie.getCreation(),
+-          cookie.getLastAccess(),
+-          cookie.getExpires()
+-        };
+-        int row = rowData.size();
+-        rowData.add(entry);
+-        fireTableRowsInserted(row, row);
+-      }
+-    }
+-
+-    public void clear() {
+-      int count = rowData.size();
+-      if (count > 0) {
+-        rowData.clear();
+-        fireTableRowsDeleted(0, count - 1);
+-      }
+-    }
+-
+-    @Override
+-    public int getRowCount() {
+-      return rowData.size();
+-    }
+-
+-    @Override
+-    public int getColumnCount() {
+-      return columnNames.length;
+-    }
+-
+-    @Override
+-    public String getColumnName(int column) {
+-      return columnNames[column];
+-    }
+-
+-    @Override
+-    public Class<?> getColumnClass(int columnIndex) {
+-      if (!rowData.isEmpty()) {
+-        if (rowData.get(0)[columnIndex] != null) {
+-          return rowData.get(0)[columnIndex].getClass();
+-        }
+-      }
+-
+-      return Object.class;
+-    }
+-
+-    @Override
+-    public Object getValueAt(int rowIndex, int columnIndex) {
+-      return rowData.get(rowIndex)[columnIndex];
+-    }
+-  }
+-}
+diff --git a/platform/platform-impl/internal/jcef/src/com/intellij/internal/jcef/JBCefBrowserDemo.java b/platform/platform-impl/internal/jcef/src/com/intellij/internal/jcef/JBCefBrowserDemo.java
+deleted file mode 100644
+index 401b5a8435cb..000000000000
+--- a/platform/platform-impl/internal/jcef/src/com/intellij/internal/jcef/JBCefBrowserDemo.java
++++ /dev/null
+@@ -1,267 +0,0 @@
+-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+-package com.intellij.internal.jcef;
+-
+-import com.intellij.openapi.actionSystem.ActionUpdateThread;
+-import com.intellij.openapi.actionSystem.AnAction;
+-import com.intellij.openapi.actionSystem.AnActionEvent;
+-import com.intellij.openapi.project.DumbAware;
+-import com.intellij.openapi.ui.DialogWrapper;
+-import com.intellij.openapi.ui.popup.JBPopupFactory;
+-import com.intellij.openapi.util.Disposer;
+-import com.intellij.openapi.wm.impl.IdeFrameImpl;
+-import com.intellij.ui.jcef.JBCefApp;
+-import com.intellij.ui.jcef.JBCefBrowser;
+-import com.intellij.ui.jcef.JBCefBrowserBase;
+-import com.intellij.ui.jcef.JBCefCookie;
+-import org.cef.CefApp;
+-import org.cef.handler.CefAppStateHandler;
+-import org.cef.handler.CefLoadHandler;
+-import org.jetbrains.annotations.NotNull;
+-import org.jetbrains.annotations.Nullable;
+-
+-import javax.swing.Action;
+-import javax.swing.BoxLayout;
+-import javax.swing.JButton;
+-import javax.swing.JComponent;
+-import javax.swing.JFrame;
+-import javax.swing.JMenu;
+-import javax.swing.JMenuBar;
+-import javax.swing.JMenuItem;
+-import javax.swing.JPanel;
+-import javax.swing.JTextArea;
+-import javax.swing.JTextField;
+-import javax.swing.SwingUtilities;
+-import javax.swing.WindowConstants;
+-import java.awt.BorderLayout;
+-import java.awt.Rectangle;
+-import java.awt.Window;
+-import java.awt.event.ActionEvent;
+-import java.awt.event.ActionListener;
+-import java.awt.event.WindowAdapter;
+-import java.awt.event.WindowEvent;
+-import java.util.List;
+-
+-/**
+- * @author tav
+- */
+-final class JBCefBrowserDemo extends AnAction implements DumbAware {
+-
+-  private static final String URL = "https://maps.google.com";
+-  private static final String myCookieManagerText = "Cookie Manager";
+-
+-  @Override
+-  public @NotNull ActionUpdateThread getActionUpdateThread() {
+-    return ActionUpdateThread.BGT;
+-  }
+-
+-  @Override
+-  public void actionPerformed(@NotNull AnActionEvent e) {
+-    Window activeFrame = IdeFrameImpl.getActiveFrame();
+-    if (activeFrame == null) return;
+-
+-    if (!JBCefApp.isSupported()) {
+-      JBPopupFactory.getInstance().createComponentPopupBuilder(
+-          new JTextArea("Set the reg key to enable JCEF:\n\"ide.browser.jcef.enabled=true\""), null).
+-        setTitle("JCEF Web Browser Is not Supported").
+-        createPopup().
+-        showInCenterOf(activeFrame);
+-      return;
+-    }
+-
+-    showBrowser(JBCefApp.isOffScreenRenderingModeEnabled());
+-  }
+-
+-  private static void showBrowser(boolean isOffScreenRendering) {
+-    Window activeFrame = IdeFrameImpl.getActiveFrame();
+-    if (activeFrame == null) return;
+-
+-    Rectangle bounds = activeFrame.getGraphicsConfiguration().getBounds();
+-
+-    final JFrame frame = new IdeFrameImpl();
+-    frame.setTitle("Web Browser" + (isOffScreenRendering ? " (OSR) " : " ") + "- JCEF");
+-    frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+-    frame.setBounds(bounds.width / 4, bounds.height / 4, bounds.width / 2, bounds.height / 2);
+-    frame.setLayout(new BorderLayout());
+-
+-    final JBCefBrowser myJBCefBrowser = JBCefBrowser.createBuilder()
+-      .setOffScreenRendering(isOffScreenRendering)
+-      .setUrl(URL)
+-      .setEnableOpenDevToolsMenuItem(true)
+-      .build();
+-
+-    myJBCefBrowser.setErrorPage(new JBCefBrowserBase.ErrorPage() {
+-      @Override
+-      public @Nullable String create(@NotNull CefLoadHandler.ErrorCode errorCode,
+-                                     @NotNull String errorText,
+-                                     @NotNull String failedUrl)
+-      {
+-        return (errorCode == CefLoadHandler.ErrorCode.ERR_ABORTED) ?
+-               null : JBCefBrowserBase.ErrorPage.DEFAULT.create(errorCode, errorText, failedUrl);
+-      }
+-    });
+-    myJBCefBrowser.setProperty(JBCefBrowser.Properties.FOCUS_ON_SHOW, Boolean.TRUE);
+-
+-
+-    frame.addWindowListener(new WindowAdapter() {
+-      @Override
+-      public void windowClosed(WindowEvent e) {
+-        Disposer.dispose(myJBCefBrowser);
+-      }
+-    });
+-
+-    frame.add(myJBCefBrowser.getComponent(), BorderLayout.CENTER);
+-
+-    final JTextField myUrlBar = new JTextField(URL);
+-    myUrlBar.addActionListener(event -> myJBCefBrowser.loadURL(myUrlBar.getText()));
+-    frame.add(myUrlBar, BorderLayout.NORTH);
+-
+-    JPanel controlPanel = new JPanel();
+-    controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.X_AXIS));
+-
+-    CefApp.getInstance().onInitialization(new CefAppStateHandler() {
+-      @Override
+-      public void stateHasChanged(CefApp.CefAppState state) {
+-        if (state == CefApp.CefAppState.INITIALIZED) {
+-          SwingUtilities.invokeLater(() -> {
+-            final CookieManagerDialog myCookieManagerDialog = new CookieManagerDialog(frame, myJBCefBrowser);
+-            myCookieManagerDialog.setVisible(false);
+-            final JButton myShowCookieManagerButton = new JButton(myCookieManagerText);
+-            myShowCookieManagerButton.addActionListener(new ActionListener() {
+-              @Override
+-              public void actionPerformed(ActionEvent e) {
+-                myCookieManagerDialog.setVisible(true);
+-                List<JBCefCookie> cookies = myJBCefBrowser.getJBCefCookieManager().getCookies();
+-                myCookieManagerDialog.update(cookies);
+-              }
+-            });
+-            controlPanel.add(myShowCookieManagerButton);
+-          });
+-        }
+-      }
+-    });
+-
+-    frame.add(controlPanel, BorderLayout.SOUTH);
+-
+-    JMenuBar menuBar = new JMenuBar();
+-    frame.setJMenuBar(menuBar);
+-    JMenu menu = new JMenu("Tools");
+-    menu.setMnemonic('t');
+-    menuBar.add(menu);
+-    JMenuItem menuItem = new JMenuItem("Load HTML with URL", 'h');
+-    menu.add(menuItem);
+-    menuItem.addActionListener(new ActionListener() {
+-      @Override
+-      public void actionPerformed(ActionEvent e) {
+-        MyOkCancelDialog<JPanel> dialog = new MyOkCancelDialog<>(frame, "Load HTML with URL");
+-        JPanel panel = new JPanel();
+-        panel.setLayout(new BorderLayout());
+-        JTextField url = new JTextField("file://foo/bar");
+-        //noinspection NonAsciiCharacters
+-        JTextArea html = new JTextArea("<html>\n<body>\nСъешь Еще Этих Мягких Французских Булок &#129366;&#129366;\n</body>\n</html>");
+-        panel.add(url, BorderLayout.NORTH);
+-        panel.add(html, BorderLayout.CENTER);
+-
+-        dialog.setComponent(panel);
+-
+-        dialog.setOkAction(() -> {
+-          myUrlBar.setText(url.getText());
+-          SwingUtilities.invokeLater(() -> myJBCefBrowser.loadHTML(html.getText(), url.getText()));
+-        }, "Load");
+-        dialog.show();
+-      }
+-    });
+-
+-    menuItem = new JMenuItem("Set background color", 'c');
+-    menu.add(menuItem);
+-    menuItem.addActionListener(new ActionListener() {
+-      @Override
+-      public void actionPerformed(ActionEvent e) {
+-        MyOkCancelDialog<JTextField> dialog = new MyOkCancelDialog<>(frame, "Background Color");
+-        JTextField color = dialog.setComponent(new JTextField("lightgreen"));
+-        dialog.setOkAction(() -> myJBCefBrowser.setPageBackgroundColor(color.getText()), "Apply");
+-        dialog.show();
+-      }
+-    });
+-
+-    final JMenuItem menuItemFocus = new JMenuItem("Set focus on navigation", 'f');
+-    menu.add(menuItemFocus);
+-    menuItemFocus.addActionListener(new ActionListener() {
+-      @Override
+-      public void actionPerformed(ActionEvent e) {
+-        boolean value = Boolean.TRUE.equals(myJBCefBrowser.getProperty(JBCefBrowser.Properties.FOCUS_ON_NAVIGATION));
+-        myJBCefBrowser.setProperty(JBCefBrowser.Properties.FOCUS_ON_NAVIGATION, !value);
+-        menuItemFocus.setText(value ? "Set focus on navigation" : "Unset focus on navigation");
+-      }
+-    });
+-
+-    final JMenuItem menuItemContext = new JMenuItem("Disable context menu", 'm');
+-    menu.add(menuItemContext);
+-    menuItemContext.addActionListener(new ActionListener() {
+-      @Override
+-      public void actionPerformed(ActionEvent e) {
+-        boolean value = Boolean.TRUE.equals(myJBCefBrowser.getProperty(JBCefBrowserBase.Properties.NO_CONTEXT_MENU));
+-        myJBCefBrowser.setProperty(JBCefBrowserBase.Properties.NO_CONTEXT_MENU, !value);
+-        menuItemContext.setText(value ? "Disable context menu" : "Enable context menu");
+-      }
+-    });
+-
+-    if (JBCefApp.isOffScreenRenderingModeEnabled()) {
+-      JMenuItem menuItemWindowedMode = new JMenuItem("Create jcef browser in Windowed-mode");
+-      menu.add(menuItemWindowedMode);
+-      menuItemWindowedMode.addActionListener(new ActionListener() {
+-        @Override
+-        public void actionPerformed(ActionEvent e) {
+-          showBrowser(false);
+-        }
+-      });
+-    }
+-    frame.setVisible(true);
+-  }
+-}
+-
+-final class MyOkCancelDialog<T extends JComponent> extends DialogWrapper {
+-  T myComp;
+-  Runnable myOkAction;
+-
+-  MyOkCancelDialog(@NotNull JFrame owner, @NotNull String title)  {
+-    super(null, owner, true, IdeModalityType.IDE);
+-
+-    setTitle(title);
+-  }
+-
+-  public T setComponent(@NotNull T comp) {
+-    return myComp = comp;
+-  }
+-
+-  public void setOkAction(@NotNull Runnable okAction, @NotNull String buttonText) {
+-    myOkAction = okAction;
+-    setOKButtonText(buttonText);
+-  }
+-
+-  @Override
+-  protected @NotNull Action getOKAction() {
+-    return new DialogWrapper.OkAction() {
+-      @Override
+-      protected void doAction(ActionEvent e) {
+-        myOkAction.run();
+-        super.doAction(e);
+-      }
+-    };
+-  }
+-
+-  @Override
+-  protected @Nullable JComponent createCenterPanel() {
+-    return myComp;
+-  }
+-
+-  @Override
+-  public @Nullable JComponent getPreferredFocusedComponent() {
+-    return myComp;
+-  }
+-
+-  @Override
+-  public void show() {
+-    init();
+-    super.show();
+-  }
+-}
+diff --git a/plugins/jcef/frontend/BUILD.bazel b/plugins/jcef/frontend/BUILD.bazel
+index a69a54ebe8be..6e58df413072 100644
+--- a/plugins/jcef/frontend/BUILD.bazel
++++ b/plugins/jcef/frontend/BUILD.bazel
+@@ -25,6 +25,13 @@ jvm_library(
+         "//platform/ui.jcef",
+         "//platform/core-impl",
+         "//platform/platform-impl:ide-impl",
++        "//libraries/jcef",
++        "//platform/util/concurrency",
++        "//platform/core-api:core",
++        "//platform/core-ui",
++        "//platform/editor-ui-api:editor-ui",
++        "//platform/ide-core",
++        "//platform/util:util-ui",
+     ],
+ )
+ 
+@@ -44,6 +51,13 @@ jvm_library(
+         "//platform/ui.jcef:ui.jcef_test_lib",
+         "//platform/core-impl:core-impl_test_lib",
+         "//platform/platform-impl:ide-impl_test_lib",
++        "//libraries/jcef:jcef_test_lib",
++        "//platform/util/concurrency:concurrency_test_lib",
++        "//platform/core-api:core_test_lib",
++        "//platform/core-ui:core-ui_test_lib",
++        "//platform/editor-ui-api:editor-ui_test_lib",
++        "//platform/ide-core:ide-core_test_lib",
++        "//platform/util:util-ui_test_lib",
+     ],
+ )
+ ### auto-generated section `build intellij.jcef.frontend` end
+diff --git a/plugins/jcef/frontend/intellij.jcef.frontend.iml b/plugins/jcef/frontend/intellij.jcef.frontend.iml
+index f8f2fdea9f06..3e2fadf6a1b0 100644
+--- a/plugins/jcef/frontend/intellij.jcef.frontend.iml
++++ b/plugins/jcef/frontend/intellij.jcef.frontend.iml
+@@ -34,5 +34,12 @@
+     <orderEntry type="module" module-name="intellij.platform.ui.jcef" />
+     <orderEntry type="module" module-name="intellij.platform.core.impl" />
+     <orderEntry type="module" module-name="intellij.platform.ide.impl" />
++    <orderEntry type="module" module-name="intellij.libraries.jcef" />
++    <orderEntry type="module" module-name="intellij.platform.concurrency" />
++    <orderEntry type="module" module-name="intellij.platform.core" />
++    <orderEntry type="module" module-name="intellij.platform.core.ui" />
++    <orderEntry type="module" module-name="intellij.platform.editor.ui" />
++    <orderEntry type="module" module-name="intellij.platform.ide.core" />
++    <orderEntry type="module" module-name="intellij.platform.util.ui" />
+   </component>
+ </module>
+\ No newline at end of file
+diff --git a/plugins/jcef/frontend/resources/intellij.jcef.frontend.xml b/plugins/jcef/frontend/resources/intellij.jcef.frontend.xml
+index 061735c2b773..6d89e9f1a36a 100644
+--- a/plugins/jcef/frontend/resources/intellij.jcef.frontend.xml
++++ b/plugins/jcef/frontend/resources/intellij.jcef.frontend.xml
+@@ -1,6 +1,7 @@
+ <idea-plugin>
+   <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+   <dependencies>
++    <module name="intellij.libraries.jcef"/>
+     <module name="intellij.platform.frontend"/>
+     <module name="intellij.platform.ui.jcef"/>
+   </dependencies>
+@@ -9,4 +10,8 @@
+   <extensions defaultExtensionNs="com.intellij">
+     <cefNativeBundleProvider implementation="com.intellij.jcef.frontend.PluggableCefNativeBundleProvider"/>
+   </extensions>
++
++  <actions>
++    <action id="WebBrowser" class="com.intellij.jcef.frontend.internal.jcef.JBCefBrowserDemo"/>
++  </actions>
+ </idea-plugin>
+diff --git a/plugins/jcef/frontend/src/internal/jcef/CookieManagerDialog.java b/plugins/jcef/frontend/src/internal/jcef/CookieManagerDialog.java
+new file mode 100644
+index 000000000000..23339d4fc66e
+--- /dev/null
++++ b/plugins/jcef/frontend/src/internal/jcef/CookieManagerDialog.java
+@@ -0,0 +1,132 @@
++// Copyright (c) 2014 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++package com.intellij.jcef.frontend.internal.jcef;
++
++import com.intellij.ui.jcef.JBCefBrowser;
++import com.intellij.ui.jcef.JBCefCookie;
++import com.intellij.ui.jcef.JBCefCookieManager;
++import com.intellij.ui.table.JBTable;
++import com.intellij.util.ui.JBDimension;
++import org.jetbrains.annotations.NotNull;
++
++import javax.swing.BoxLayout;
++import javax.swing.JButton;
++import javax.swing.JDialog;
++import javax.swing.JPanel;
++import javax.swing.JScrollPane;
++import javax.swing.JTable;
++import javax.swing.table.AbstractTableModel;
++import java.awt.BorderLayout;
++import java.awt.Dimension;
++import java.awt.Frame;
++import java.awt.event.ActionEvent;
++import java.awt.event.ActionListener;
++import java.util.ArrayList;
++import java.util.List;
++
++final class CookieManagerDialog extends JDialog {
++  private static final String myTitle = "Cookie Manager";
++  private static final String myDeleteCookiesButtonText = "Delete All Cookies";
++  @SuppressWarnings("unused") private final JBCefBrowser myJBCefBrowser;
++  private final JBCefCookieManager myJBCefCookieManager;
++  private final CookieTableModel myTableModel = new CookieTableModel();
++
++  CookieManagerDialog(Frame owner, JBCefBrowser jbCefBrowser) {
++    super(owner, myTitle, false);
++    setLayout(new BorderLayout());
++    setSize(JBDimension.size(new Dimension(800, 600)));
++
++    myJBCefBrowser = jbCefBrowser;
++    myJBCefCookieManager = jbCefBrowser.getJBCefCookieManager();
++    JTable cookieTable = new JBTable(myTableModel);
++    cookieTable.setFillsViewportHeight(true);
++    add(new JScrollPane(cookieTable));
++
++    JPanel controlPanel = new JPanel();
++    controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.X_AXIS));
++
++    final JButton myDeleteCookiesButton = new JButton(myDeleteCookiesButtonText);
++    myDeleteCookiesButton.addActionListener(new ActionListener() {
++      @Override
++      public void actionPerformed(ActionEvent e) {
++        if (myJBCefCookieManager.deleteCookies(true)) {
++          List<JBCefCookie> cookies = myJBCefCookieManager.getCookies();
++          update(cookies);
++        }
++      }
++    });
++    controlPanel.add(myDeleteCookiesButton);
++
++    add(controlPanel, BorderLayout.SOUTH);
++  }
++
++  public void update(List<? extends JBCefCookie> cefCookies) {
++    myTableModel.clear();
++    myTableModel.show(cefCookies);
++  }
++
++  private static final class CookieTableModel extends AbstractTableModel {
++    private final String[] columnNames =
++      new String[]{"Name", "Value", "Domain", "Path", "Secure", "HTTP only", "Created", "Last Access", "Expires"};
++    private final ArrayList<Object[]> rowData = new ArrayList<>();
++
++    private void show(@NotNull List<? extends JBCefCookie> cefCookies) {
++      for (JBCefCookie cookie : cefCookies) {
++        Object[] entry = {
++          cookie.getName(),
++          cookie.getValue(),
++          cookie.getDomain(),
++          cookie.getPath(),
++          cookie.isSecure(),
++          cookie.isHttpOnly(),
++          cookie.getCreation(),
++          cookie.getLastAccess(),
++          cookie.getExpires()
++        };
++        int row = rowData.size();
++        rowData.add(entry);
++        fireTableRowsInserted(row, row);
++      }
++    }
++
++    public void clear() {
++      int count = rowData.size();
++      if (count > 0) {
++        rowData.clear();
++        fireTableRowsDeleted(0, count - 1);
++      }
++    }
++
++    @Override
++    public int getRowCount() {
++      return rowData.size();
++    }
++
++    @Override
++    public int getColumnCount() {
++      return columnNames.length;
++    }
++
++    @Override
++    public String getColumnName(int column) {
++      return columnNames[column];
++    }
++
++    @Override
++    public Class<?> getColumnClass(int columnIndex) {
++      if (!rowData.isEmpty()) {
++        if (rowData.get(0)[columnIndex] != null) {
++          return rowData.get(0)[columnIndex].getClass();
++        }
++      }
++
++      return Object.class;
++    }
++
++    @Override
++    public Object getValueAt(int rowIndex, int columnIndex) {
++      return rowData.get(rowIndex)[columnIndex];
++    }
++  }
++}
+diff --git a/plugins/jcef/frontend/src/internal/jcef/JBCefBrowserDemo.java b/plugins/jcef/frontend/src/internal/jcef/JBCefBrowserDemo.java
+new file mode 100644
+index 000000000000..bfdd0e02df44
+--- /dev/null
++++ b/plugins/jcef/frontend/src/internal/jcef/JBCefBrowserDemo.java
+@@ -0,0 +1,281 @@
++// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
++package com.intellij.jcef.frontend.internal.jcef;
++
++import com.intellij.openapi.actionSystem.ActionUpdateThread;
++import com.intellij.openapi.actionSystem.AnAction;
++import com.intellij.openapi.actionSystem.AnActionEvent;
++import com.intellij.openapi.project.DumbAware;
++import com.intellij.openapi.project.Project;
++import com.intellij.openapi.ui.DialogWrapper;
++import com.intellij.openapi.ui.popup.JBPopupFactory;
++import com.intellij.openapi.util.Disposer;
++import com.intellij.openapi.wm.WindowManager;
++import com.intellij.ui.jcef.JBCefApp;
++import com.intellij.ui.jcef.JBCefBrowser;
++import com.intellij.ui.jcef.JBCefBrowserBase;
++import com.intellij.ui.jcef.JBCefCookie;
++import org.cef.CefApp;
++import org.cef.handler.CefAppStateHandler;
++import org.cef.handler.CefLoadHandler;
++import org.jetbrains.annotations.NotNull;
++import org.jetbrains.annotations.Nullable;
++
++import javax.swing.Action;
++import javax.swing.BoxLayout;
++import javax.swing.JButton;
++import javax.swing.JComponent;
++import javax.swing.JFrame;
++import javax.swing.JMenu;
++import javax.swing.JMenuBar;
++import javax.swing.JMenuItem;
++import javax.swing.JPanel;
++import javax.swing.JTextArea;
++import javax.swing.JTextField;
++import javax.swing.SwingUtilities;
++import javax.swing.WindowConstants;
++import java.awt.BorderLayout;
++import java.awt.GraphicsConfiguration;
++import java.awt.KeyboardFocusManager;
++import java.awt.Rectangle;
++import java.awt.Window;
++import java.awt.event.ActionEvent;
++import java.awt.event.ActionListener;
++import java.awt.event.WindowAdapter;
++import java.awt.event.WindowEvent;
++import java.util.List;
++
++/**
++ * @author tav
++ */
++@SuppressWarnings("HardCodedStringLiteral")
++final class JBCefBrowserDemo extends AnAction implements DumbAware {
++
++  private static final String URL = "https://maps.google.com";
++  private static final String myCookieManagerText = "Cookie Manager";
++
++  @Override
++  public @NotNull ActionUpdateThread getActionUpdateThread() {
++    return ActionUpdateThread.BGT;
++  }
++
++  @Override
++  public void actionPerformed(@NotNull AnActionEvent e) {
++    Window parentWindow = getParentWindow(e.getProject());
++    if (parentWindow == null) return;
++
++    if (!JBCefApp.isSupported()) {
++      JBPopupFactory.getInstance().createComponentPopupBuilder(
++          new JTextArea("Set the reg key to enable JCEF:\n\"ide.browser.jcef.enabled=true\""), null).
++        setTitle("JCEF Web Browser Is not Supported").
++        createPopup().
++        showInCenterOf(parentWindow);
++      return;
++    }
++
++    showBrowser(parentWindow, JBCefApp.isOffScreenRenderingModeEnabled());
++  }
++
++  private static @Nullable Window getParentWindow(@Nullable Project project) {
++    Window window = WindowManager.getInstance().suggestParentWindow(project);
++    if (window != null) return window;
++
++    window = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
++    if (window != null) return window;
++
++    return WindowManager.getInstance().findVisibleFrame();
++  }
++
++  private static void showBrowser(@NotNull Window parentWindow, boolean isOffScreenRendering) {
++    GraphicsConfiguration graphicsConfiguration = parentWindow.getGraphicsConfiguration();
++    if (graphicsConfiguration == null) return;
++
++    Rectangle bounds = graphicsConfiguration.getBounds();
++
++    final JFrame frame = new JFrame();
++    frame.setTitle("Web Browser" + (isOffScreenRendering ? " (OSR) " : " ") + "- JCEF");
++    frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
++    frame.setBounds(bounds.width / 4, bounds.height / 4, bounds.width / 2, bounds.height / 2);
++    frame.setLayout(new BorderLayout());
++
++    final JBCefBrowser myJBCefBrowser = JBCefBrowser.createBuilder()
++      .setOffScreenRendering(isOffScreenRendering)
++      .setUrl(URL)
++      .setEnableOpenDevToolsMenuItem(true)
++      .build();
++
++    myJBCefBrowser.setErrorPage(new JBCefBrowserBase.ErrorPage() {
++      @Override
++      public @Nullable String create(@NotNull CefLoadHandler.ErrorCode errorCode,
++                                     @NotNull String errorText,
++                                     @NotNull String failedUrl)
++      {
++        return (errorCode == CefLoadHandler.ErrorCode.ERR_ABORTED) ?
++               null : JBCefBrowserBase.ErrorPage.DEFAULT.create(errorCode, errorText, failedUrl);
++      }
++    });
++    myJBCefBrowser.setProperty(JBCefBrowser.Properties.FOCUS_ON_SHOW, Boolean.TRUE);
++
++
++    frame.addWindowListener(new WindowAdapter() {
++      @Override
++      public void windowClosed(WindowEvent e) {
++        Disposer.dispose(myJBCefBrowser);
++      }
++    });
++
++    frame.add(myJBCefBrowser.getComponent(), BorderLayout.CENTER);
++
++    final JTextField myUrlBar = new JTextField(URL);
++    myUrlBar.addActionListener(event -> myJBCefBrowser.loadURL(myUrlBar.getText()));
++    frame.add(myUrlBar, BorderLayout.NORTH);
++
++    JPanel controlPanel = new JPanel();
++    controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.X_AXIS));
++
++    CefApp.getInstance().onInitialization(new CefAppStateHandler() {
++      @Override
++      public void stateHasChanged(CefApp.CefAppState state) {
++        if (state == CefApp.CefAppState.INITIALIZED) {
++          SwingUtilities.invokeLater(() -> {
++            final CookieManagerDialog myCookieManagerDialog = new CookieManagerDialog(frame, myJBCefBrowser);
++            myCookieManagerDialog.setVisible(false);
++            final JButton myShowCookieManagerButton = new JButton(myCookieManagerText);
++            myShowCookieManagerButton.addActionListener(new ActionListener() {
++              @Override
++              public void actionPerformed(ActionEvent e) {
++                myCookieManagerDialog.setVisible(true);
++                List<JBCefCookie> cookies = myJBCefBrowser.getJBCefCookieManager().getCookies();
++                myCookieManagerDialog.update(cookies);
++              }
++            });
++            controlPanel.add(myShowCookieManagerButton);
++          });
++        }
++      }
++    });
++
++    frame.add(controlPanel, BorderLayout.SOUTH);
++
++    JMenuBar menuBar = new JMenuBar();
++    frame.setJMenuBar(menuBar);
++    JMenu menu = new JMenu("Tools");
++    menu.setMnemonic('t');
++    menuBar.add(menu);
++    JMenuItem menuItem = new JMenuItem("Load HTML with URL", 'h');
++    menu.add(menuItem);
++    menuItem.addActionListener(new ActionListener() {
++      @Override
++      public void actionPerformed(ActionEvent e) {
++        MyOkCancelDialog<JPanel> dialog = new MyOkCancelDialog<>(frame, "Load HTML with URL");
++        JPanel panel = new JPanel();
++        panel.setLayout(new BorderLayout());
++        JTextField url = new JTextField("file://foo/bar");
++        //noinspection NonAsciiCharacters
++        JTextArea html = new JTextArea("<html>\n<body>\nСъешь Еще Этих Мягких Французских Булок &#129366;&#129366;\n</body>\n</html>");
++        panel.add(url, BorderLayout.NORTH);
++        panel.add(html, BorderLayout.CENTER);
++
++        dialog.setComponent(panel);
++
++        dialog.setOkAction(() -> {
++          myUrlBar.setText(url.getText());
++          SwingUtilities.invokeLater(() -> myJBCefBrowser.loadHTML(html.getText(), url.getText()));
++        }, "Load");
++        dialog.show();
++      }
++    });
++
++    menuItem = new JMenuItem("Set background color", 'c');
++    menu.add(menuItem);
++    menuItem.addActionListener(new ActionListener() {
++      @Override
++      public void actionPerformed(ActionEvent e) {
++        MyOkCancelDialog<JTextField> dialog = new MyOkCancelDialog<>(frame, "Background Color");
++        JTextField color = dialog.setComponent(new JTextField("lightgreen"));
++        dialog.setOkAction(() -> myJBCefBrowser.setPageBackgroundColor(color.getText()), "Apply");
++        dialog.show();
++      }
++    });
++
++    final JMenuItem menuItemFocus = new JMenuItem("Set focus on navigation", 'f');
++    menu.add(menuItemFocus);
++    menuItemFocus.addActionListener(new ActionListener() {
++      @Override
++      public void actionPerformed(ActionEvent e) {
++        boolean value = Boolean.TRUE.equals(myJBCefBrowser.getProperty(JBCefBrowser.Properties.FOCUS_ON_NAVIGATION));
++        myJBCefBrowser.setProperty(JBCefBrowser.Properties.FOCUS_ON_NAVIGATION, !value);
++        menuItemFocus.setText(value ? "Set focus on navigation" : "Unset focus on navigation");
++      }
++    });
++
++    final JMenuItem menuItemContext = new JMenuItem("Disable context menu", 'm');
++    menu.add(menuItemContext);
++    menuItemContext.addActionListener(new ActionListener() {
++      @Override
++      public void actionPerformed(ActionEvent e) {
++        boolean value = Boolean.TRUE.equals(myJBCefBrowser.getProperty(JBCefBrowserBase.Properties.NO_CONTEXT_MENU));
++        myJBCefBrowser.setProperty(JBCefBrowserBase.Properties.NO_CONTEXT_MENU, !value);
++        menuItemContext.setText(value ? "Disable context menu" : "Enable context menu");
++      }
++    });
++
++    if (JBCefApp.isOffScreenRenderingModeEnabled()) {
++      JMenuItem menuItemWindowedMode = new JMenuItem("Create jcef browser in Windowed-mode");
++      menu.add(menuItemWindowedMode);
++      menuItemWindowedMode.addActionListener(new ActionListener() {
++        @Override
++        public void actionPerformed(ActionEvent e) {
++          showBrowser(frame, false);
++        }
++      });
++    }
++    frame.setVisible(true);
++  }
++}
++
++final class MyOkCancelDialog<T extends JComponent> extends DialogWrapper {
++  T myComp;
++  Runnable myOkAction;
++
++  MyOkCancelDialog(@NotNull JFrame owner, @NotNull String title)  {
++    super(null, owner, true, IdeModalityType.IDE);
++
++    setTitle(title);
++  }
++
++  public T setComponent(@NotNull T comp) {
++    return myComp = comp;
++  }
++
++  public void setOkAction(@NotNull Runnable okAction, @NotNull String buttonText) {
++    myOkAction = okAction;
++    setOKButtonText(buttonText);
++  }
++
++  @Override
++  protected @NotNull Action getOKAction() {
++    return new DialogWrapper.OkAction() {
++      @Override
++      protected void doAction(ActionEvent e) {
++        myOkAction.run();
++        super.doAction(e);
++      }
++    };
++  }
++
++  @Override
++  protected @Nullable JComponent createCenterPanel() {
++    return myComp;
++  }
++
++  @Override
++  public @Nullable JComponent getPreferredFocusedComponent() {
++    return myComp;
++  }
++
++  @Override
++  public void show() {
++    init();
++    super.show();
++  }
++}
+diff --git a/platform/core-api/api-dump-experimental.txt b/platform/core-api/api-dump-experimental.txt
+index 2a44d092511a..bf5c2d09b2fc 100644
+--- a/platform/core-api/api-dump-experimental.txt
++++ b/platform/core-api/api-dump-experimental.txt
+@@ -55,6 +55,7 @@ com.intellij.ide.plugins.DynamicPluginListener
+ - s:values():com.intellij.ide.plugins.IdeaPluginOsRequirement[]
+ *f:com.intellij.ide.plugins.IdeaPluginOsRequirement$Companion
+ - f:fromModuleId(com.intellij.openapi.extensions.PluginId):com.intellij.ide.plugins.IdeaPluginOsRequirement
++- f:fromOs(com.intellij.util.system.OS):com.intellij.ide.plugins.IdeaPluginOsRequirement
+ - f:getHostOsModuleIds():java.util.List
+ *a:com.intellij.lang.LanguageMatcher
+ - s:match(com.intellij.lang.Language):com.intellij.lang.LanguageMatcher
+diff --git a/platform/core-api/src/com/intellij/ide/plugins/IdeaPluginOsRequirement.kt b/platform/core-api/src/com/intellij/ide/plugins/IdeaPluginOsRequirement.kt
+index 7726b4e3f50c..e6848d6db039 100644
+--- a/platform/core-api/src/com/intellij/ide/plugins/IdeaPluginOsRequirement.kt
++++ b/platform/core-api/src/com/intellij/ide/plugins/IdeaPluginOsRequirement.kt
+@@ -48,6 +48,14 @@ enum class IdeaPluginOsRequirement {
+     fun fromModuleId(moduleId: PluginId): IdeaPluginOsRequirement? =
+       directory[moduleId] ?: Unknown.takeIf { looksLikeOsModuleId(moduleId.idString) }
+ 
++    fun fromOs(os: OS): IdeaPluginOsRequirement? = when (os) {
++      OS.Windows -> Windows
++      OS.macOS -> Mac
++      OS.Linux -> Linux
++      OS.FreeBSD -> FreeBSD
++      OS.Other -> null
++    }
++
+     private fun looksLikeOsModuleId(idString: String): Boolean = idString.startsWith(osModuleIdPrefix)
+   }
+ }
+diff --git a/platform/core-api/src/com/intellij/ide/plugins/PluginCpuArchRequirement.kt b/platform/core-api/src/com/intellij/ide/plugins/PluginCpuArchRequirement.kt
+index 852fde5686e0..c488c81741a5 100644
+--- a/platform/core-api/src/com/intellij/ide/plugins/PluginCpuArchRequirement.kt
++++ b/platform/core-api/src/com/intellij/ide/plugins/PluginCpuArchRequirement.kt
+@@ -44,6 +44,10 @@ enum class PluginCpuArchRequirement {
+       return directory[pluginId] ?: Unknown.takeIf { looksLikeCpuArchModuleId(pluginId.idString) }
+     }
+ 
++    fun fromArch(arch: CpuArch): PluginCpuArchRequirement? {
++      return fromPluginId(PluginId.getId(archPluginAliasIdPrefix + arch.name.lowercase()))
++    }
++
+     private fun looksLikeCpuArchModuleId(idString: String): Boolean = idString.startsWith(archPluginAliasIdPrefix)
+   }
+ }
+diff --git a/platform/core-impl/src/com/intellij/ide/plugins/PluginManagerCore.kt b/platform/core-impl/src/com/intellij/ide/plugins/PluginManagerCore.kt
+index 153735ae02d4..168159f4174c 100644
+--- a/platform/core-impl/src/com/intellij/ide/plugins/PluginManagerCore.kt
++++ b/platform/core-impl/src/com/intellij/ide/plugins/PluginManagerCore.kt
+@@ -48,6 +48,8 @@ private const val PLATFORM_ALIAS_DEPENDENCY_PREFIX = "com.intellij.module"
+ internal val QODANA_PLUGINS_THIRD_PARTY_ACCEPT = System.getProperty("idea.qodana.thirdpartyplugins.accept").toBoolean()
+ internal val FLEET_BACKEND_PLUGINS_THIRD_PARTY_ACCEPT = System.getProperty("fleet.backend.third-party.plugins.accept").toBoolean()
+ 
++private val LOG = Logger.getInstance(PluginManagerCore::class.java)
++
+ /**
+  * See [Plugin Model](https://youtrack.jetbrains.com/articles/IJPL-A-31/Plugin-Model) documentation.
+  *
+@@ -454,8 +456,23 @@ object PluginManagerCore {
+   fun isIncompatible(descriptor: IdeaPluginDescriptor, buildNumber: BuildNumber?): Boolean =
+     checkBuildNumberCompatibility(descriptor, buildNumber ?: PluginManagerCore.buildNumber) != null
+ 
++  private val OS_ARCH_DEPENDENCY_VERSION: Regex = Regex("([\\w.]+)-(\\w+)-(\\w+)")
++
+   @ApiStatus.Internal
+   fun getUnfulfilledOsRequirement(descriptor: IdeaPluginDescriptor): IdeaPluginOsRequirement? {
++    if (descriptor.dependencies.isEmpty()) {
++      // try to infer Arch requirement from version, some plugin repositories do not provide dependencies
++      val matchedVersion = descriptor.version?.let { OS_ARCH_DEPENDENCY_VERSION.matchEntire(it) }
++      val osTag = matchedVersion?.groupValues[2] ?: return null
++
++      LOG.debug("Inferred OS for version: ${descriptor.version} of ${descriptor.pluginId} is $osTag")
++
++      return OS.fromString(osTag)
++        .takeIf { it != OS.Other }
++        ?.let { IdeaPluginOsRequirement.fromOs(it) }
++        ?.takeIf { osReq -> !osReq.isHostOs() }
++    }
++
+     return descriptor.getDependencies().asSequence()
+       .mapNotNull { dep -> IdeaPluginOsRequirement.fromModuleId(dep.pluginId).takeIf { !dep.isOptional } }
+       .firstOrNull { osReq -> !osReq.isHostOs() }
+@@ -463,6 +480,19 @@ object PluginManagerCore {
+ 
+   @ApiStatus.Internal
+   fun getUnfulfilledCpuArchRequirement(descriptor: IdeaPluginDescriptor): PluginCpuArchRequirement? {
++    if (descriptor.dependencies.isEmpty()) {
++      // try to infer Arch requirement from version, some plugin repositories do not provide dependencies
++      val matchedVersion = descriptor.version?.let { OS_ARCH_DEPENDENCY_VERSION.matchEntire(it) }
++      val archTag = matchedVersion?.groupValues[3] ?: return null
++
++      LOG.debug("Inferred arch for version: ${descriptor.version} of ${descriptor.pluginId} is $archTag")
++
++      return CpuArch.fromString(archTag)
++        .takeIf { it != CpuArch.OTHER && it != CpuArch.UNKNOWN }
++        ?.let { PluginCpuArchRequirement.fromArch(it) }
++        ?.takeIf { osReq -> !osReq.isHostArch() }
++    }
++
+     return descriptor.getDependencies().asSequence()
+       .mapNotNull { dep -> PluginCpuArchRequirement.fromPluginId(dep.pluginId).takeIf { !dep.isOptional } }
+       .firstOrNull { osReq -> !osReq.isHostArch() }
+diff --git a/platform/platform-tests/testSrc/com/intellij/ide/plugins/PluginManagerTest.kt b/platform/platform-tests/testSrc/com/intellij/ide/plugins/PluginManagerTest.kt
+index bdbda46911c3..ccbcaf704b7a 100644
+--- a/platform/platform-tests/testSrc/com/intellij/ide/plugins/PluginManagerTest.kt
++++ b/platform/platform-tests/testSrc/com/intellij/ide/plugins/PluginManagerTest.kt
+@@ -221,6 +221,56 @@ class PluginManagerTest {
+     }
+   }
+ 
++  @Test
++  fun `unfulfilled os requirement is inferred from version when dependencies are empty`() {
++    fun descriptor(version: String?) = object : TestIdeaPluginDescriptor() {
++      override fun getDependencies(): List<IdeaPluginDependency> = emptyList()
++      override fun getVersion(): String? = version
++      override fun getPluginId(): PluginId = PluginId.getId("test.plugin")
++    }
++    fun assertInferred(version: String?, expected: IdeaPluginOsRequirement?) {
++      assertThat(PluginManagerCore.getUnfulfilledOsRequirement(descriptor(version)))
++        .isEqualTo(expected?.takeIf { !it.isHostOs() })
++    }
++
++    assertInferred("1.0.0-windows-amd64", IdeaPluginOsRequirement.Windows)
++    assertInferred("1.0.0-mac-arm64", IdeaPluginOsRequirement.Mac)
++    assertInferred("1.0.0-linux-amd64", IdeaPluginOsRequirement.Linux)
++    assertInferred("1.0.0-freebsd-amd64", IdeaPluginOsRequirement.FreeBSD)
++    // unrecognized OS tag maps to OS.Other and is filtered out
++    assertInferred("1.0.0-solaris-amd64", null)
++    // versions that do not match the <version>-<os>-<arch> pattern infer nothing
++    assertInferred("1.0.0", null)
++    assertInferred("241.SNAPSHOT", null)
++    // a missing version must not throw and infers nothing
++    assertInferred(null, null)
++  }
++
++  @Test
++  fun `unfulfilled cpu arch requirement is inferred from version when dependencies are empty`() {
++    fun descriptor(version: String?) = object : TestIdeaPluginDescriptor() {
++      override fun getDependencies(): List<IdeaPluginDependency> = emptyList()
++      override fun getVersion(): String? = version
++      override fun getPluginId(): PluginId = PluginId.getId("test.plugin")
++    }
++    fun assertInferred(version: String?, expected: PluginCpuArchRequirement?) {
++      assertThat(PluginManagerCore.getUnfulfilledCpuArchRequirement(descriptor(version)))
++        .isEqualTo(expected?.takeIf { !it.isHostArch() })
++    }
++
++    assertInferred("1.0.0-windows-amd64", PluginCpuArchRequirement.X86_64)
++    assertInferred("1.0.0-windows-x86_64", PluginCpuArchRequirement.X86_64)
++    assertInferred("1.0.0-windows-x86", PluginCpuArchRequirement.X86)
++    assertInferred("1.0.0-windows-arm64", PluginCpuArchRequirement.ARM64)
++    assertInferred("1.0.0-windows-aarch64", PluginCpuArchRequirement.ARM64)
++    // unrecognized arch tag maps to CpuArch.OTHER/UNKNOWN and is filtered out
++    assertInferred("1.0.0-windows-sparc", null)
++    // versions that do not match the <version>-<os>-<arch> pattern infer nothing
++    assertInferred("1.0.0", null)
++    // a missing version must not throw and infers nothing
++    assertInferred(null, null)
++  }
++
+   companion object {
+     private val testDataPath: String
+       get() = PlatformTestUtil.getPlatformTestDataPath() + "plugins/sort"
+diff --git a/platform/core-impl/src/com/intellij/ide/plugins/PluginManagerCore.kt b/platform/core-impl/src/com/intellij/ide/plugins/PluginManagerCore.kt
+index 168159f4174c..d77f9078e3c3 100644
+--- a/platform/core-impl/src/com/intellij/ide/plugins/PluginManagerCore.kt
++++ b/platform/core-impl/src/com/intellij/ide/plugins/PluginManagerCore.kt
+@@ -465,7 +465,7 @@ object PluginManagerCore {
+       val matchedVersion = descriptor.version?.let { OS_ARCH_DEPENDENCY_VERSION.matchEntire(it) }
+       val osTag = matchedVersion?.groupValues[2] ?: return null
+ 
+-      LOG.debug("Inferred OS for version: ${descriptor.version} of ${descriptor.pluginId} is $osTag")
++      LOG.warn("Required OS for ${descriptor.pluginId} version: ${descriptor.version} is $osTag")
+ 
+       return OS.fromString(osTag)
+         .takeIf { it != OS.Other }
+@@ -485,7 +485,7 @@ object PluginManagerCore {
+       val matchedVersion = descriptor.version?.let { OS_ARCH_DEPENDENCY_VERSION.matchEntire(it) }
+       val archTag = matchedVersion?.groupValues[3] ?: return null
+ 
+-      LOG.debug("Inferred arch for version: ${descriptor.version} of ${descriptor.pluginId} is $archTag")
++      LOG.warn("Required arch for ${descriptor.pluginId} version: ${descriptor.version} is $archTag")
+ 
+       return CpuArch.fromString(archTag)
+         .takeIf { it != CpuArch.OTHER && it != CpuArch.UNKNOWN }

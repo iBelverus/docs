@@ -1,0 +1,947 @@
+# JCEF/CEF changes: CEF 137->144 and native bundles (IJPL-203516, IJPL-243802, IJPL-244083)
+# Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
+# Apply with: git apply 0001-cef-144-and-native-bundles.patch
+#
+#   e79a28c88a0a6f7c8cc34496d4bc1aa0373270a7 2026-02-11 Yuriy Artamonov | [jcef] IJPL-203516 Build JCEF plugin with native bundles
+#   706518f3193f341c2498852bc7836f51d978c66a 2026-02-11 Yuriy Artamonov | [jcef] IJPL-203516 Update product layouts
+#   ebb02febf5f729bc855b9a601d03de4ae924d54b 2026-02-11 Yuriy Artamonov | [jcef] IJPL-203516 Packaging
+#   ab95d6a814a1f39881829df67f10faa66a00cb9e 2026-04-17 Yuriy Artamonov | [jcef] IJPL-203516 Log info on JCEF loading
+#   c2615ea3add1192ee7d0092d28c55712f0004f65 2026-04-17 Vladimir Kharitonov | [JCEF] IJPL-203516 update jcef
+#   cccb636e4ee373d3165f3ca5ea28d26131cd67de 2026-04-19 Yuriy Artamonov | [jcef] IJPL-203516 Update JCEF for plugin 262-b28
+#   139175dd2721ee8de9bf1842bcc7f3f7e2420008 2026-04-20 Yuriy Artamonov | [jcef] IJPL-203516 Enable executable flags for MacOS
+#   e8d921349b60fc20c342f85d8aee3fdc9bf7f022 2026-04-28 Vladimir Kharitonov | IJPL-243802 [jcef] Switch to CEF 144
+#   5ba8ab1cfe37f2e95ec81fc8e3de8640c068f50c 2026-05-04 Vladimir Kharitonov | IJPL-244083 [jcef] Adapt MarkdownPreviewSecurityTest to CEF 144
+#   41beba2fb9418b569b4674b74e04b4483e6fec62 2026-05-05 Vladimir Kharitonov | [jcef] IJPL-203516 update jcef to 262b37
+#
+diff --git a/.idea/modules.xml b/.idea/modules.xml
+index 19810d20393b..e2ad097a8853 100644
+--- a/.idea/modules.xml
++++ b/.idea/modules.xml
+@@ -718,6 +718,7 @@
+       <module fileurl="file://$PROJECT_DIR$/plugins/javaFX/sceneBuilder/intellij.javaFX.sceneBuilder.iml" filepath="$PROJECT_DIR$/plugins/javaFX/sceneBuilder/intellij.javaFX.sceneBuilder.iml" />
+       <module fileurl="file://$PROJECT_DIR$/plugins/javaFX/intellij.javaFX.tests.iml" filepath="$PROJECT_DIR$/plugins/javaFX/intellij.javaFX.tests.iml" />
+       <module fileurl="file://$PROJECT_DIR$/platform/script-debugger/protocol/protocol-reader/intellij.javascript.protocolReader.iml" filepath="$PROJECT_DIR$/platform/script-debugger/protocol/protocol-reader/intellij.javascript.protocolReader.iml" />
++      <module fileurl="file://$PROJECT_DIR$/plugins/jcef/plugin/intellij.jcef.plugin.iml" filepath="$PROJECT_DIR$/plugins/jcef/plugin/intellij.jcef.plugin.iml" />
+       <module fileurl="file://$PROJECT_DIR$/json/intellij.json.iml" filepath="$PROJECT_DIR$/json/intellij.json.iml" />
+       <module fileurl="file://$PROJECT_DIR$/json/backend/intellij.json.backend.iml" filepath="$PROJECT_DIR$/json/backend/intellij.json.backend.iml" />
+       <module fileurl="file://$PROJECT_DIR$/json/backend/regexp/intellij.json.backend.regexp.iml" filepath="$PROJECT_DIR$/json/backend/regexp/intellij.json.backend.regexp.iml" />
+diff --git a/build/bazel-generated-file-list.txt b/build/bazel-generated-file-list.txt
+index 3f70a1900a51..1f1a0d859a6a 100644
+--- a/build/bazel-generated-file-list.txt
++++ b/build/bazel-generated-file-list.txt
+@@ -1107,6 +1107,7 @@ plugins/javaFX/common
+ plugins/javaFX/community
+ plugins/javaFX/jps
+ plugins/javaFX/sceneBuilder
++plugins/jcef/plugin
+ plugins/jshell
+ plugins/jshell/console
+ plugins/jshell/execution
+diff --git a/build/dependencies/dependencies.properties b/build/dependencies/dependencies.properties
+index 4811ed911fe3..40e14477d83a 100644
+--- a/build/dependencies/dependencies.properties
++++ b/build/dependencies/dependencies.properties
+@@ -10,3 +10,4 @@ restarterBuild=243.6005
+ runtimeBuild=25.0.2b432.38
+ snapDockerImage=registry.jetbrains.team/p/ij/docker-hub/jetbrains/snapcraft@sha256:0059496b7a941e27937bc523621a336bddc1327de8dcd03f6b0bd0b57892ce43
+ toolboxBuild=3.2.0.65851
++jcefBuild=261-b50
+diff --git a/build/src/org/jetbrains/intellij/build/IdeaCommunityProperties.kt b/build/src/org/jetbrains/intellij/build/IdeaCommunityProperties.kt
+index 7d95be662dc1..1b860560858c 100644
+--- a/build/src/org/jetbrains/intellij/build/IdeaCommunityProperties.kt
++++ b/build/src/org/jetbrains/intellij/build/IdeaCommunityProperties.kt
+@@ -195,7 +195,6 @@ fun intellijCommunityBaseFragment(platformPrefix: String? = null): ProductModule
+ 
+   if (platformPrefix != "AndroidStudio") {
+     alias("com.intellij.platform.ide.provisioner")
+-    alias("com.intellij.modules.jcef")
+   }
+ 
+   include(CommunityProductFragments.javaIdeBaseFragment())
+diff --git a/platform/build-scripts/src/org/jetbrains/intellij/build/BaseIdeaProperties.kt b/platform/build-scripts/src/org/jetbrains/intellij/build/BaseIdeaProperties.kt
+index ad46338fb5fc..cd2f89f8d60a 100644
+--- a/platform/build-scripts/src/org/jetbrains/intellij/build/BaseIdeaProperties.kt
++++ b/platform/build-scripts/src/org/jetbrains/intellij/build/BaseIdeaProperties.kt
+@@ -58,6 +58,7 @@ val IDEA_BUNDLED_PLUGINS: PersistentList<String> = DEFAULT_BUNDLED_PLUGINS + per
+   "intellij.performanceTesting",
+   "intellij.compose.ide.plugin",
+   "intellij.moduleSet.plugin.debugger.streams",
++  "intellij.jcef.plugin" // todo add to all IDEs
+ )
+ 
+ val CE_CLASS_VERSIONS: Map<String, String> = mapOf(
+diff --git a/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt b/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
+index 4accf89b6979..121bc37b0652 100644
+--- a/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
++++ b/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
+@@ -6,6 +6,8 @@ package org.jetbrains.intellij.build
+ import kotlinx.collections.immutable.PersistentList
+ import kotlinx.collections.immutable.persistentListOf
+ import org.jetbrains.intellij.build.dependencies.BuildDependenciesDownloader
++import org.jetbrains.intellij.build.dependencies.BuildDependenciesExtractOptions
++import org.jetbrains.intellij.build.impl.BuildUtils.checkedReplace
+ import org.jetbrains.intellij.build.impl.BundledMavenDownloader
+ import org.jetbrains.intellij.build.impl.LibraryPackMode
+ import org.jetbrains.intellij.build.impl.ModuleItem
+@@ -25,6 +27,7 @@ import org.jetbrains.intellij.build.python.PythonCommunityPluginModules
+ import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
+ import org.jetbrains.intellij.build.telemetry.use
+ import java.net.URI
++import java.nio.file.Files
+ import java.nio.file.Path
+ import java.util.Locale
+ 
+@@ -238,7 +241,8 @@ object CommunityRepositoryModules {
+     pluginAuto("intellij.java.jshell") { spec ->
+       spec.withModule("intellij.java.jshell.protocol", "jshell-protocol.jar")
+       spec.withModuleLibrary("jshell-frontend", "intellij.java.jshell.execution", "jshell-frontend.jar")
+-    }
++    },
++    *allJcefPlugins()
+   )
+ 
+   val CONTRIB_REPOSITORY_PLUGINS: List<PluginLayout> = java.util.List.of(
+@@ -295,6 +299,67 @@ object CommunityRepositoryModules {
+     }
+   }
+ 
++  fun allJcefPlugins(): Array<PluginLayout> {
++    val supportedOsArch = listOf(
++      SupportedDistribution(os = OsFamily.MACOS, arch = JvmArchitecture.x64, MacLibcImpl.DEFAULT),
++      SupportedDistribution(os = OsFamily.MACOS, arch = JvmArchitecture.aarch64, MacLibcImpl.DEFAULT),
++      SupportedDistribution(os = OsFamily.WINDOWS, arch = JvmArchitecture.x64, WindowsLibcImpl.DEFAULT),
++      SupportedDistribution(os = OsFamily.WINDOWS, arch = JvmArchitecture.aarch64, WindowsLibcImpl.DEFAULT),
++      SupportedDistribution(os = OsFamily.LINUX, arch = JvmArchitecture.x64, LinuxLibcImpl.GLIBC),
++      SupportedDistribution(os = OsFamily.LINUX, arch = JvmArchitecture.aarch64, LinuxLibcImpl.GLIBC),
++    )
++
++    return supportedOsArch
++      .map { (os, arch, _) -> jcefPlugin(os, arch) }
++      .toTypedArray()
++  }
++
++  fun jcefPlugin(os: OsFamily, arch: JvmArchitecture): PluginLayout {
++    return plugin("intellij.jcef.plugin") { spec ->
++      spec.bundlingRestrictions.supportedOs = persistentListOf(os)
++      spec.bundlingRestrictions.supportedArch = persistentListOf(arch)
++
++      fun archSuffix(arch: JvmArchitecture): String = when (arch) {
++        JvmArchitecture.x64 -> "x64"
++        JvmArchitecture.aarch64 -> "aarch64"
++      }
++
++      fun jcefArchiveName(os: OsFamily, arch: JvmArchitecture, build: String): String =
++        "jcef-${os.jbrArchiveSuffix}-${archSuffix(arch)}-${build}.tar.gz"
++
++      fun downloadUrlFor(os: OsFamily, arch: JvmArchitecture, build: String): String =
++        "https://cache-redirector.jetbrains.com/intellij-jbr/${jcefArchiveName(os, arch, build)}"
++
++      spec.withRawPluginXmlPatcher { text, _ ->
++        checkedReplace(
++          oldText = text,
++          regex = " <!-- OS/ARCH-DEPENDENCY-PLACEHOLDER -->",
++          newText = """
++          |<plugin id="com.intellij.modules.os.${os.osId}"/>
++          |<plugin id="com.intellij.modules.arch.${arch.marketplaceName}"/>
++        """.trimMargin(),
++        )
++      }
++
++      spec.withCustomVersion { _, ideBuildNumber, _ ->
++        // be careful, Marketplace expects linux/macos/windows for os and x86_64/x86/arm64/arm32 for arch
++        val pluginVersion = "$ideBuildNumber-${os.osId}-${arch.marketplaceName}"
++        PluginVersionEvaluatorResult(pluginVersion)
++      }
++
++      spec.withGeneratedResources { targetDir, context ->
++        val communityRoot = context.paths.communityHomeDirRoot
++        val properties = BuildDependenciesDownloader.getDependencyProperties(communityRoot)
++        val jcefBuildNumber = properties.property("jcefBuild")
++
++        val archivePath = downloadFileToCacheLocation(downloadUrlFor(os, arch, jcefBuildNumber), communityRoot)
++        Files.createDirectories(targetDir)
++
++        BuildDependenciesDownloader.extractFile(archivePath, targetDir, communityRoot, BuildDependenciesExtractOptions.STRIP_ROOT)
++      }
++    }
++  }
++
+   fun androidPlugin(
+     additionalModulesToJars: Map<String, String> = emptyMap(),
+     mainModuleName: String = "intellij.android.plugin.descriptor",
+diff --git a/platform/build-scripts/src/org/jetbrains/intellij/build/JetBrainsRuntimeDistribution.java b/platform/build-scripts/src/org/jetbrains/intellij/build/JetBrainsRuntimeDistribution.java
+index 9a0387901a34..e5e2e132d66b 100644
+--- a/platform/build-scripts/src/org/jetbrains/intellij/build/JetBrainsRuntimeDistribution.java
++++ b/platform/build-scripts/src/org/jetbrains/intellij/build/JetBrainsRuntimeDistribution.java
+@@ -11,6 +11,11 @@ public enum JetBrainsRuntimeDistribution {
+    */
+   JCEF("jcef"),
+ 
++  /**
++   * JBR with DCEVM, for IDEs distribution
++   */
++  STANDARD(""), // todo change to the real prefix
++
+   /**
+    * JBR without JCEF and DCEVM
+    */
+diff --git a/platform/build-scripts/src/org/jetbrains/intellij/build/ProductProperties.kt b/platform/build-scripts/src/org/jetbrains/intellij/build/ProductProperties.kt
+index 592e047417f0..00732eb35cc0 100644
+--- a/platform/build-scripts/src/org/jetbrains/intellij/build/ProductProperties.kt
++++ b/platform/build-scripts/src/org/jetbrains/intellij/build/ProductProperties.kt
+@@ -369,7 +369,7 @@ abstract class ProductProperties {
+    */
+   var modulesToCompileTests: PersistentList<String> = persistentListOf()
+ 
+-  var runtimeDistribution: JetBrainsRuntimeDistribution = JetBrainsRuntimeDistribution.JCEF
++  var runtimeDistribution: JetBrainsRuntimeDistribution = JetBrainsRuntimeDistribution.STANDARD
+ 
+   /**
+    * A prefix for names of environment variables used by product distributions
+diff --git a/plugins/jcef/plugin/BUILD.bazel b/plugins/jcef/plugin/BUILD.bazel
+new file mode 100644
+index 000000000000..2fa74279458b
+--- /dev/null
++++ b/plugins/jcef/plugin/BUILD.bazel
+@@ -0,0 +1,22 @@
++### auto-generated section `build intellij.jcef.plugin` start
++load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
++
++resourcegroup(
++  name = "plugin_resources",
++  srcs = glob(["resources/**/*"]),
++  strip_prefix = "resources"
++)
++
++jvm_library(
++  name = "plugin",
++  module_name = "intellij.jcef.plugin",
++  visibility = ["//visibility:public"],
++  srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
++  resources = [":plugin_resources"],
++  deps = [
++    "@lib//:kotlin-stdlib",
++    "//platform/ui.jcef",
++    "//platform/platform-impl:ide-impl",
++  ]
++)
++### auto-generated section `build intellij.jcef.plugin` end
+\ No newline at end of file
+diff --git a/plugins/jcef/plugin/intellij.jcef.plugin.iml b/plugins/jcef/plugin/intellij.jcef.plugin.iml
+new file mode 100644
+index 000000000000..8f6733458046
+--- /dev/null
++++ b/plugins/jcef/plugin/intellij.jcef.plugin.iml
+@@ -0,0 +1,16 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<module type="JAVA_MODULE" version="4">
++  <component name="NewModuleRootManager" inherit-compiler-output="true">
++    <exclude-output />
++    <content url="file://$MODULE_DIR$">
++      <sourceFolder url="file://$MODULE_DIR$/resources" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" packagePrefix="com.intellij.jcef.plugin" />
++    </content>
++    <orderEntry type="inheritedJdk" />
++    <orderEntry type="library" name="kotlin-stdlib" level="project" />
++    <orderEntry type="sourceFolder" forTests="false" />
++    <orderEntry type="module" module-name="intellij.platform.ui.jcef" />
++    <orderEntry type="module" module-name="intellij.platform.ide.impl" />
++    <orderEntry type="module" module-name="intellij.platform.core.impl" />
++  </component>
++</module>
+\ No newline at end of file
+diff --git a/plugins/jcef/plugin/resources/META-INF/plugin.xml b/plugins/jcef/plugin/resources/META-INF/plugin.xml
+new file mode 100644
+index 000000000000..f0094f5daf83
+--- /dev/null
++++ b/plugins/jcef/plugin/resources/META-INF/plugin.xml
+@@ -0,0 +1,18 @@
++<idea-plugin>
++  <id>com.intellij.modules.jcef</id>
++  <name>Web Browser (JCEF)</name>
++  <vendor>JetBrains</vendor>
++  <category>Other Tools</category>
++  <description><![CDATA[
++    Provides web browser integration based on JCEF, a framework for embedding Chromium-based browsers in Java applications.
++  ]]></description>
++
++  <dependencies>
++    <!-- OS/ARCH-DEPENDENCY-PLACEHOLDER -->
++    <plugin id="com.intellij.modules.platform"/>
++  </dependencies>
++
++  <extensions defaultExtensionNs="com.intellij">
++    <cefNativeBundleProvider implementation="com.intellij.jcef.plugin.PluggableCefNativeBundleProvider"/>
++  </extensions>
++</idea-plugin>
+diff --git a/plugins/jcef/plugin/src/PluggableCefNativeBundleProvider.kt b/plugins/jcef/plugin/src/PluggableCefNativeBundleProvider.kt
+new file mode 100644
+index 000000000000..d15124fe9f82
+--- /dev/null
++++ b/plugins/jcef/plugin/src/PluggableCefNativeBundleProvider.kt
+@@ -0,0 +1,14 @@
++package com.intellij.jcef.plugin
++
++import com.intellij.ide.plugins.getPluginDistDirByClass
++import com.intellij.ui.jcef.JBCefNativeBundleProvider
++import kotlin.io.path.absolutePathString
++
++internal class PluggableCefNativeBundleProvider : JBCefNativeBundleProvider {
++  override fun isAvailable(): Boolean = true
++
++  override fun getNativeBundlePath(): String? {
++    val distDir = getPluginDistDirByClass(javaClass)?.resolve("jcef")
++    return distDir?.absolutePathString()
++  }
++}
+diff --git a/community-resources/resources/META-INF/IdeaPlugin.xml b/community-resources/resources/META-INF/IdeaPlugin.xml
+index 61529c88bc85..9c878c884467 100644
+--- a/community-resources/resources/META-INF/IdeaPlugin.xml
++++ b/community-resources/resources/META-INF/IdeaPlugin.xml
+@@ -6,7 +6,6 @@
+   <module value="com.intellij.modules.idea"/>
+   <module value="com.intellij.modules.idea.community"/>
+   <module value="com.intellij.modules.java-capable"/>
+-  <module value="com.intellij.modules.jcef"/>
+   <module value="com.intellij.modules.jsp.base"/>
+   <module value="com.intellij.modules.python-core-capable"/>
+   <module value="com.intellij.modules.python-in-non-pycharm-ide-capable"/>
+diff --git a/plugins/jcef/plugin/BUILD.bazel b/plugins/jcef/plugin/BUILD.bazel
+index 2fa74279458b..fb270c86481e 100644
+--- a/plugins/jcef/plugin/BUILD.bazel
++++ b/plugins/jcef/plugin/BUILD.bazel
+@@ -17,6 +17,7 @@ jvm_library(
+     "@lib//:kotlin-stdlib",
+     "//platform/ui.jcef",
+     "//platform/platform-impl:ide-impl",
++    "//platform/core-impl",
+   ]
+ )
+ ### auto-generated section `build intellij.jcef.plugin` end
+\ No newline at end of file
+diff --git a/plugins/jcef/plugin/resources/META-INF/plugin.xml b/plugins/jcef/plugin/resources/META-INF/plugin.xml
+index f0094f5daf83..4209f2b54f3e 100644
+--- a/plugins/jcef/plugin/resources/META-INF/plugin.xml
++++ b/plugins/jcef/plugin/resources/META-INF/plugin.xml
+@@ -7,10 +7,6 @@
+     Provides web browser integration based on JCEF, a framework for embedding Chromium-based browsers in Java applications.
+   ]]></description>
+ 
+-  <dependencies>
+-    <!-- OS/ARCH-DEPENDENCY-PLACEHOLDER -->
+-    <plugin id="com.intellij.modules.platform"/>
+-  </dependencies>
+ 
+   <extensions defaultExtensionNs="com.intellij">
+     <cefNativeBundleProvider implementation="com.intellij.jcef.plugin.PluggableCefNativeBundleProvider"/>
+diff --git a/platform/build-scripts/src/org/jetbrains/intellij/build/BaseIdeaProperties.kt b/platform/build-scripts/src/org/jetbrains/intellij/build/BaseIdeaProperties.kt
+index cd2f89f8d60a..ad46338fb5fc 100644
+--- a/platform/build-scripts/src/org/jetbrains/intellij/build/BaseIdeaProperties.kt
++++ b/platform/build-scripts/src/org/jetbrains/intellij/build/BaseIdeaProperties.kt
+@@ -58,7 +58,6 @@ val IDEA_BUNDLED_PLUGINS: PersistentList<String> = DEFAULT_BUNDLED_PLUGINS + per
+   "intellij.performanceTesting",
+   "intellij.compose.ide.plugin",
+   "intellij.moduleSet.plugin.debugger.streams",
+-  "intellij.jcef.plugin" // todo add to all IDEs
+ )
+ 
+ val CE_CLASS_VERSIONS: Map<String, String> = mapOf(
+diff --git a/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt b/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
+index 121bc37b0652..b973e95ddcbb 100644
+--- a/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
++++ b/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
+@@ -29,6 +29,7 @@ import org.jetbrains.intellij.build.telemetry.use
+ import java.net.URI
+ import java.nio.file.Files
+ import java.nio.file.Path
++import java.nio.file.StandardCopyOption
+ import java.util.Locale
+ 
+ object CommunityRepositoryModules {
+@@ -309,9 +310,15 @@ object CommunityRepositoryModules {
+       SupportedDistribution(os = OsFamily.LINUX, arch = JvmArchitecture.aarch64, LinuxLibcImpl.GLIBC),
+     )
+ 
+-    return supportedOsArch
+-      .map { (os, arch, _) -> jcefPlugin(os, arch) }
+-      .toTypedArray()
++    val allLayouts = ArrayList(supportedOsArch.map { (os, arch, _) -> jcefPlugin(os, arch) })
++    allLayouts += jcefCrossPlatformEmpty()
++    return allLayouts.toTypedArray()
++  }
++
++  private fun jcefCrossPlatformEmpty(): PluginLayout {
++    return plugin("intellij.jcef.plugin") { // cross-platform distribution comes without JCEF binaries
++      it.bundlingRestrictions.includeInDistribution = PluginDistribution.CROSS_PLATFORM_DIST_ONLY
++    }
+   }
+ 
+   fun jcefPlugin(os: OsFamily, arch: JvmArchitecture): PluginLayout {
+@@ -353,9 +360,15 @@ object CommunityRepositoryModules {
+         val jcefBuildNumber = properties.property("jcefBuild")
+ 
+         val archivePath = downloadFileToCacheLocation(downloadUrlFor(os, arch, jcefBuildNumber), communityRoot)
+-        Files.createDirectories(targetDir)
++        val subDir = targetDir.resolve("jcef-tmp") // to not clean up root plugin directory on BuildDependenciesDownloader.extractFile
++        Files.createDirectories(subDir)
++
++        BuildDependenciesDownloader.extractFile(archivePath, subDir, communityRoot, BuildDependenciesExtractOptions.STRIP_ROOT)
+ 
+-        BuildDependenciesDownloader.extractFile(archivePath, targetDir, communityRoot, BuildDependenciesExtractOptions.STRIP_ROOT)
++        // unix ZIP does not have root `jcef` directory
++        val jcefOutputDir = if (Files.exists(subDir.resolve("jcef"))) subDir.resolve("jcef") else subDir
++        Files.move(jcefOutputDir, targetDir.resolve("jcef"), StandardCopyOption.REPLACE_EXISTING)
++        Files.deleteIfExists(subDir)
+       }
+     }
+   }
+diff --git a/platform/build-scripts/src/org/jetbrains/intellij/build/productLayout/ProductModulesLayout.kt b/platform/build-scripts/src/org/jetbrains/intellij/build/productLayout/ProductModulesLayout.kt
+index eb658ff7fdf9..92d08e963916 100644
+--- a/platform/build-scripts/src/org/jetbrains/intellij/build/productLayout/ProductModulesLayout.kt
++++ b/platform/build-scripts/src/org/jetbrains/intellij/build/productLayout/ProductModulesLayout.kt
+@@ -21,11 +21,12 @@ import org.jetbrains.intellij.build.impl.PluginLayout
+  * Default bundled plugins for all products.
+  */
+ val DEFAULT_BUNDLED_PLUGINS: PersistentList<String> = persistentListOf(
+-  "intellij.platform.images",
++  "intellij.dev",
++  "intellij.jcef.plugin",
+   "intellij.moduleSet.plugin.grid.core",
+   "intellij.moduleSet.plugin.recentFiles",
+   "intellij.moduleSet.plugin.vcs.frontend",
+-  "intellij.dev"
++  "intellij.platform.images",
+ )
+ 
+ class ProductModulesLayout {
+diff --git a/plugins/jcef/plugin/BUILD.bazel b/plugins/jcef/plugin/BUILD.bazel
+index fb270c86481e..8ee85eee065b 100644
+--- a/plugins/jcef/plugin/BUILD.bazel
++++ b/plugins/jcef/plugin/BUILD.bazel
+@@ -20,4 +20,23 @@ jvm_library(
+     "//platform/core-impl",
+   ]
+ )
+-### auto-generated section `build intellij.jcef.plugin` end
+\ No newline at end of file
++
++jvm_library(
++  name = "plugin_test_lib",
++  module_name = "intellij.jcef.plugin",
++  visibility = ["//visibility:public"],
++  srcs = glob([], allow_empty = True),
++  runtime_deps = [
++    ":plugin",
++    "//platform/ui.jcef:ui.jcef_test_lib",
++    "//platform/platform-impl:ide-impl_test_lib",
++    "//platform/core-impl:core-impl_test_lib",
++  ]
++)
++### auto-generated section `build intellij.jcef.plugin` end
++
++### auto-generated section `iml intellij.jcef.plugin` start
++exports_files([
++  "intellij.jcef.plugin.iml",
++], visibility = ["//visibility:public"])
++### auto-generated section `iml intellij.jcef.plugin` end
+\ No newline at end of file
+diff --git a/plugins/jcef/plugin/plugin-content.yaml b/plugins/jcef/plugin/plugin-content.yaml
+new file mode 100644
+index 000000000000..ecba7c3222bc
+--- /dev/null
++++ b/plugins/jcef/plugin/plugin-content.yaml
+@@ -0,0 +1,3 @@
++- name: lib/jcef-plugin.jar
++  modules:
++  - name: intellij.jcef.plugin
+\ No newline at end of file
+diff --git a/plugins/jcef/plugin/resources/META-INF/plugin.xml b/plugins/jcef/plugin/resources/META-INF/plugin.xml
+index 4209f2b54f3e..aceb33d7d961 100644
+--- a/plugins/jcef/plugin/resources/META-INF/plugin.xml
++++ b/plugins/jcef/plugin/resources/META-INF/plugin.xml
+@@ -1,4 +1,4 @@
+-<idea-plugin>
++<idea-plugin allow-bundled-update="true">
+   <id>com.intellij.modules.jcef</id>
+   <name>Web Browser (JCEF)</name>
+   <vendor>JetBrains</vendor>
+@@ -7,6 +7,10 @@
+     Provides web browser integration based on JCEF, a framework for embedding Chromium-based browsers in Java applications.
+   ]]></description>
+ 
++  <dependencies>
++    <!-- OS/ARCH-DEPENDENCY-PLACEHOLDER -->
++    <plugin id="com.intellij.modules.platform"/>
++  </dependencies>
+ 
+   <extensions defaultExtensionNs="com.intellij">
+     <cefNativeBundleProvider implementation="com.intellij.jcef.plugin.PluggableCefNativeBundleProvider"/>
+diff --git a/plugins/jcef/plugin/resources/META-INF/pluginIcon.svg b/plugins/jcef/plugin/resources/META-INF/pluginIcon.svg
+new file mode 100644
+index 000000000000..c72d2f5fc02e
+--- /dev/null
++++ b/plugins/jcef/plugin/resources/META-INF/pluginIcon.svg
+@@ -0,0 +1 @@
++<svg width="40" height="40" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><mask id="cutout-mask"><rect width="16" height="16" fill="white"/><g stroke="black" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><path d="M10.7127 14.7107C10.4717 14.1134 10.3093 13.3479 10.2631 12.5H9.04102C9.2053 13.4792 9.84398 14.2976 10.7127 14.7107Z" fill="black" stroke="black"/><path d="M11.6783 14.4276C11.4715 13.955 11.3129 13.285 11.2647 12.5H12.7343C12.6861 13.285 12.5276 13.955 12.3208 14.4276C12.202 14.6991 12.085 14.8652 11.9995 14.9529C11.9141 14.8652 11.797 14.6991 11.6783 14.4276Z" fill="black" stroke="black"/><path d="M11.6783 9.57238C11.4715 10.0449 11.3129 10.715 11.2647 11.5H12.7343C12.6861 10.715 12.5276 10.0449 12.3208 9.57238C12.202 9.30087 12.085 9.13482 11.9995 9.04712C11.9141 9.13482 11.797 9.30087 11.6783 9.57238Z" fill="black" stroke="black"/><path d="M13.2864 14.7107C13.5274 14.1134 13.6897 13.3479 13.736 12.5H14.9581C14.7938 13.4792 14.1551 14.2976 13.2864 14.7107Z" fill="black" stroke="black"/><path d="M13.736 11.5H14.9581C14.7938 10.5207 14.1551 9.70236 13.2864 9.28924C13.5274 9.88657 13.6897 10.6521 13.736 11.5Z" fill="black" stroke="black"/><path d="M9.04102 11.5H10.2631C10.3093 10.6521 10.4717 9.88657 10.7127 9.28924C9.84398 9.70236 9.2053 10.5207 9.04102 11.5Z" fill="black" stroke="black"/><path d="M16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16C14.2091 16 16 14.2091 16 12ZM10.2635 12.5C10.3098 13.3479 10.4722 14.1134 10.7131 14.7107C9.84445 14.2976 9.20577 13.4792 9.04148 12.5H10.2635ZM11.2652 12.5C11.3134 13.285 11.472 13.955 11.6787 14.4276C11.7975 14.6991 11.9146 14.8652 12 14.9529C12.0854 14.8652 12.2025 14.6991 12.3213 14.4276C12.528 13.955 12.6866 13.285 12.7348 12.5H11.2652ZM12.7348 11.5H11.2652C11.3134 10.715 11.472 10.045 11.6787 9.57239C11.7975 9.30089 11.9146 9.13483 12 9.04713C12.0854 9.13483 12.2025 9.30089 12.3213 9.57239C12.528 10.045 12.6866 10.715 12.7348 11.5ZM13.7365 12.5C13.6902 13.3479 13.5278 14.1134 13.2869 14.7107C14.1556 14.2976 14.7942 13.4792 14.9585 12.5H13.7365ZM14.9585 11.5H13.7365C13.6902 10.6521 13.5278 9.88659 13.2869 9.28925C14.1556 9.70237 14.7942 10.5208 14.9585 11.5ZM10.2635 11.5H9.04148C9.20577 10.5208 9.84445 9.70237 10.7131 9.28925C10.4722 9.88659 10.3098 10.6521 10.2635 11.5Z" fill="black" stroke="black"/></g></mask></defs><g mask="url(#cutout-mask)"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="#EBECF0" stroke="#6C707E"/><path d="M4 5C3.72386 5 3.5 5.22386 3.5 5.5C3.5 5.77614 3.72386 6 4 6H5C5.27614 6 5.5 5.77614 5.5 5.5C5.5 5.22386 5.27614 5 5 5H4Z" fill="#6C707E"/><path d="M7 5C6.72386 5 6.5 5.22386 6.5 5.5C6.5 5.77614 6.72386 6 7 6H8C8.27614 6 8.5 5.77614 8.5 5.5C8.5 5.22386 8.27614 5 8 5H7Z" fill="#6C707E"/></g><g><path d="M10.7127 14.7107C10.4717 14.1134 10.3093 13.3479 10.2631 12.5H9.04102C9.2053 13.4792 9.84398 14.2976 10.7127 14.7107Z" fill="#E7EFFD"/><path d="M11.6783 14.4276C11.4715 13.955 11.3129 13.285 11.2647 12.5H12.7343C12.6861 13.285 12.5276 13.955 12.3208 14.4276C12.202 14.6991 12.085 14.8652 11.9995 14.9529C11.9141 14.8652 11.797 14.6991 11.6783 14.4276Z" fill="#E7EFFD"/><path d="M11.6783 9.57238C11.4715 10.0449 11.3129 10.715 11.2647 11.5H12.7343C12.6861 10.715 12.5276 10.0449 12.3208 9.57238C12.202 9.30087 12.085 9.13482 11.9995 9.04712C11.9141 9.13482 11.797 9.30087 11.6783 9.57238Z" fill="#E7EFFD"/><path d="M13.2864 14.7107C13.5274 14.1134 13.6897 13.3479 13.736 12.5H14.9581C14.7938 13.4792 14.1551 14.2976 13.2864 14.7107Z" fill="#E7EFFD"/><path d="M13.736 11.5H14.9581C14.7938 10.5207 14.1551 9.70236 13.2864 9.28924C13.5274 9.88657 13.6897 10.6521 13.736 11.5Z" fill="#E7EFFD"/><path d="M9.04102 11.5H10.2631C10.3093 10.6521 10.4717 9.88657 10.7127 9.28924C9.84398 9.70236 9.2053 10.5207 9.04102 11.5Z" fill="#E7EFFD"/><path fill-rule="evenodd" clip-rule="evenodd" d="M16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16C14.2091 16 16 14.2091 16 12ZM10.2635 12.5C10.3098 13.3479 10.4722 14.1134 10.7131 14.7107C9.84445 14.2976 9.20577 13.4792 9.04148 12.5H10.2635ZM11.2652 12.5C11.3134 13.285 11.472 13.955 11.6787 14.4276C11.7975 14.6991 11.9146 14.8652 12 14.9529C12.0854 14.8652 12.2025 14.6991 12.3213 14.4276C12.528 13.955 12.6866 13.285 12.7348 12.5H11.2652ZM12.7348 11.5H11.2652C11.3134 10.715 11.472 10.045 11.6787 9.57239C11.7975 9.30089 11.9146 9.13483 12 9.04713C12.0854 9.13483 12.2025 9.30089 12.3213 9.57239C12.528 10.045 12.6866 10.715 12.7348 11.5ZM13.7365 12.5C13.6902 13.3479 13.5278 14.1134 13.2869 14.7107C14.1556 14.2976 14.7942 13.4792 14.9585 12.5H13.7365ZM14.9585 11.5H13.7365C13.6902 10.6521 13.5278 9.88659 13.2869 9.28925C14.1556 9.70237 14.7942 10.5208 14.9585 11.5ZM10.2635 11.5H9.04148C9.20577 10.5208 9.84445 9.70237 10.7131 9.28925C10.4722 9.88659 10.3098 10.6521 10.2635 11.5Z" fill="#3574F0"/></g></svg>
+\ No newline at end of file
+diff --git a/plugins/jcef/plugin/resources/META-INF/pluginIcon_dark.svg b/plugins/jcef/plugin/resources/META-INF/pluginIcon_dark.svg
+new file mode 100644
+index 000000000000..1cd3463a6ddc
+--- /dev/null
++++ b/plugins/jcef/plugin/resources/META-INF/pluginIcon_dark.svg
+@@ -0,0 +1 @@
++<svg width="40" height="40" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><mask id="cutout-mask"><rect width="16" height="16" fill="white"/><g stroke="black" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><path d="M10.7127 14.7107C10.4717 14.1134 10.3093 13.3479 10.2631 12.5H9.04102C9.2053 13.4792 9.84398 14.2976 10.7127 14.7107Z" fill="black" stroke="black"/><path d="M11.6783 14.4276C11.4715 13.955 11.3129 13.285 11.2647 12.5H12.7343C12.6861 13.285 12.5276 13.955 12.3208 14.4276C12.202 14.6991 12.085 14.8652 11.9995 14.9529C11.9141 14.8652 11.797 14.6991 11.6783 14.4276Z" fill="black" stroke="black"/><path d="M11.6783 9.57238C11.4715 10.0449 11.3129 10.715 11.2647 11.5H12.7343C12.6861 10.715 12.5276 10.0449 12.3208 9.57238C12.202 9.30087 12.085 9.13482 11.9995 9.04712C11.9141 9.13482 11.797 9.30087 11.6783 9.57238Z" fill="black" stroke="black"/><path d="M13.2864 14.7107C13.5274 14.1134 13.6897 13.3479 13.736 12.5H14.9581C14.7938 13.4792 14.1551 14.2976 13.2864 14.7107Z" fill="black" stroke="black"/><path d="M13.736 11.5H14.9581C14.7938 10.5207 14.1551 9.70236 13.2864 9.28924C13.5274 9.88657 13.6897 10.6521 13.736 11.5Z" fill="black" stroke="black"/><path d="M9.04102 11.5H10.2631C10.3093 10.6521 10.4717 9.88657 10.7127 9.28924C9.84398 9.70236 9.2053 10.5207 9.04102 11.5Z" fill="black" stroke="black"/><path d="M16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16C14.2091 16 16 14.2091 16 12ZM10.2635 12.5C10.3098 13.3479 10.4722 14.1134 10.7131 14.7107C9.84445 14.2976 9.20577 13.4792 9.04148 12.5H10.2635ZM11.2652 12.5C11.3134 13.285 11.472 13.955 11.6787 14.4276C11.7975 14.6991 11.9146 14.8652 12 14.9529C12.0854 14.8652 12.2025 14.6991 12.3213 14.4276C12.528 13.955 12.6866 13.285 12.7348 12.5H11.2652ZM12.7348 11.5H11.2652C11.3134 10.715 11.472 10.045 11.6787 9.57239C11.7975 9.30089 11.9146 9.13483 12 9.04713C12.0854 9.13483 12.2025 9.30089 12.3213 9.57239C12.528 10.045 12.6866 10.715 12.7348 11.5ZM13.7365 12.5C13.6902 13.3479 13.5278 14.1134 13.2869 14.7107C14.1556 14.2976 14.7942 13.4792 14.9585 12.5H13.7365ZM14.9585 11.5H13.7365C13.6902 10.6521 13.5278 9.88659 13.2869 9.28925C14.1556 9.70237 14.7942 10.5208 14.9585 11.5ZM10.2635 11.5H9.04148C9.20577 10.5208 9.84445 9.70237 10.7131 9.28925C10.4722 9.88659 10.3098 10.6521 10.2635 11.5Z" fill="black" stroke="black"/></g></mask></defs><g mask="url(#cutout-mask)"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="#43454A" stroke="#CED0D6"/><path d="M4 5C3.72386 5 3.5 5.22386 3.5 5.5C3.5 5.77614 3.72386 6 4 6H5C5.27614 6 5.5 5.77614 5.5 5.5C5.5 5.22386 5.27614 5 5 5H4Z" fill="#CED0D6"/><path d="M7 5C6.72386 5 6.5 5.22386 6.5 5.5C6.5 5.77614 6.72386 6 7 6H8C8.27614 6 8.5 5.77614 8.5 5.5C8.5 5.22386 8.27614 5 8 5H7Z" fill="#CED0D6"/></g><g><path d="M10.7127 14.7107C10.4717 14.1134 10.3093 13.3479 10.2631 12.5H9.04102C9.2053 13.4792 9.84398 14.2976 10.7127 14.7107Z" fill="#25324D"/><path d="M11.6783 14.4276C11.4715 13.955 11.3129 13.285 11.2647 12.5H12.7343C12.6861 13.285 12.5276 13.955 12.3208 14.4276C12.202 14.6991 12.085 14.8652 11.9995 14.9529C11.9141 14.8652 11.797 14.6991 11.6783 14.4276Z" fill="#25324D"/><path d="M11.6783 9.57238C11.4715 10.0449 11.3129 10.715 11.2647 11.5H12.7343C12.6861 10.715 12.5276 10.0449 12.3208 9.57238C12.202 9.30087 12.085 9.13482 11.9995 9.04712C11.9141 9.13482 11.797 9.30087 11.6783 9.57238Z" fill="#25324D"/><path d="M13.2864 14.7107C13.5274 14.1134 13.6897 13.3479 13.736 12.5H14.9581C14.7938 13.4792 14.1551 14.2976 13.2864 14.7107Z" fill="#25324D"/><path d="M13.736 11.5H14.9581C14.7938 10.5207 14.1551 9.70236 13.2864 9.28924C13.5274 9.88657 13.6897 10.6521 13.736 11.5Z" fill="#25324D"/><path d="M9.04102 11.5H10.2631C10.3093 10.6521 10.4717 9.88657 10.7127 9.28924C9.84398 9.70236 9.2053 10.5207 9.04102 11.5Z" fill="#25324D"/><path fill-rule="evenodd" clip-rule="evenodd" d="M16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16C14.2091 16 16 14.2091 16 12ZM10.2635 12.5C10.3098 13.3479 10.4722 14.1134 10.7131 14.7107C9.84445 14.2976 9.20577 13.4792 9.04148 12.5H10.2635ZM11.2652 12.5C11.3134 13.285 11.472 13.955 11.6787 14.4276C11.7975 14.6991 11.9146 14.8652 12 14.9529C12.0854 14.8652 12.2025 14.6991 12.3213 14.4276C12.528 13.955 12.6866 13.285 12.7348 12.5H11.2652ZM12.7348 11.5H11.2652C11.3134 10.715 11.472 10.045 11.6787 9.57239C11.7975 9.30089 11.9146 9.13483 12 9.04713C12.0854 9.13483 12.2025 9.30089 12.3213 9.57239C12.528 10.045 12.6866 10.715 12.7348 11.5ZM13.7365 12.5C13.6902 13.3479 13.5278 14.1134 13.2869 14.7107C14.1556 14.2976 14.7942 13.4792 14.9585 12.5H13.7365ZM14.9585 11.5H13.7365C13.6902 10.6521 13.5278 9.88659 13.2869 9.28925C14.1556 9.70237 14.7942 10.5208 14.9585 11.5ZM10.2635 11.5H9.04148C9.20577 10.5208 9.84445 9.70237 10.7131 9.28925C10.4722 9.88659 10.3098 10.6521 10.2635 11.5Z" fill="#548AF7"/></g></svg>
+\ No newline at end of file
+diff --git a/platform/ui.jcef/jcef/JBCefApp.java b/platform/ui.jcef/jcef/JBCefApp.java
+index 0998da999b40..63c0d58bb835 100644
+--- a/platform/ui.jcef/jcef/JBCefApp.java
++++ b/platform/ui.jcef/jcef/JBCefApp.java
+@@ -730,6 +730,7 @@ public final class JBCefApp {
+   private static @Nullable String getNativeBundlePath() {
+     // the native bundle provider is used only if there is no JCEF in JBR
+     if (isJcefFromJbr()) {
++      LOG.info("JCEF is loaded from JBR, using default native bundle path");
+       return null;
+     }
+ 
+@@ -741,7 +742,12 @@ public final class JBCefApp {
+       return null;
+     }
+ 
+-    return provider.getNativeBundlePath();
++    String providerNativeBundlePath = provider.getNativeBundlePath();
++    if (providerNativeBundlePath != null) {
++      LOG.info("Using bundle path from: " + provider.getClass() + " path:" + providerNativeBundlePath);
++    }
++
++    return providerNativeBundlePath;
+   }
+ 
+   private static boolean isLinuxLibcSupported() {
+diff --git a/lib/BUILD.bazel b/lib/BUILD.bazel
+index 0ed96e47a7be..77005366a81c 100644
+--- a/lib/BUILD.bazel
++++ b/lib/BUILD.bazel
+@@ -12153,17 +12153,17 @@ jvm_import(
+ )
+ 
+ copy_file(
+-  name = "org.jetbrains.intellij.deps.jcef/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50.jar_copy",
+-  src = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-261-b50_http//file",
+-  out = "org.jetbrains.intellij.deps.jcef/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50.jar",
++  name = "org.jetbrains.intellij.deps.jcef/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar_copy",
++  src = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28_http//file",
++  out = "org.jetbrains.intellij.deps.jcef/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar",
+   allow_symlink = True,
+   visibility = ["//visibility:public"]
+ )
+ 
+ jvm_import(
+   name = "libraries-jcef-jcef",
+-  jar = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-261-b50_http//file",
+-  source_jar = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-261-b50-sources_http//file",
++  jar = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28_http//file",
++  source_jar = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28-sources_http//file",
+   visibility = ["//visibility:public"]
+ )
+ 
+diff --git a/lib/MODULE.bazel b/lib/MODULE.bazel
+index d9fd2c2c4090..3694c280b5db 100644
+--- a/lib/MODULE.bazel
++++ b/lib/MODULE.bazel
+@@ -9534,17 +9534,17 @@ http_file(
+ )
+ 
+ http_file(
+-  name = "org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-261-b50_http",
+-  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50.jar",
+-  sha256 = "b275a4fbff6f712768a937001ee4550fc7d2cde22bdb54c7bcecd9393aba7c13",
+-  downloaded_file_path = "jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50.jar"
++  name = "org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28_http",
++  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar",
++  sha256 = "1775368c2338d0cb00809e4c67a73c1577ac493a6d7ddc98ad361615f5a2b9f6",
++  downloaded_file_path = "jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar"
+ )
+ 
+ http_file(
+-  name = "org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-261-b50-sources_http",
+-  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50-sources.jar",
+-  sha256 = "e998029b3a533c593b12c671655f01aabf34c6b7583f9e6dc3e805d072592a58",
+-  downloaded_file_path = "jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50-sources.jar"
++  name = "org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28-sources_http",
++  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28-sources.jar",
++  sha256 = "a967641067ca79df40b2add9b84e220f2eb4d84623e5284184ef5d39b874cc58",
++  downloaded_file_path = "jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28-sources.jar"
+ )
+ 
+ http_file(
+diff --git a/libraries/jcef/intellij.libraries.jcef.iml b/libraries/jcef/intellij.libraries.jcef.iml
+index 1786a7adb31c..193ddb53a77d 100644
+--- a/libraries/jcef/intellij.libraries.jcef.iml
++++ b/libraries/jcef/intellij.libraries.jcef.iml
+@@ -9,19 +9,19 @@
+     <orderEntry type="sourceFolder" forTests="false" />
+     <orderEntry type="module-library" exported="">
+       <library name="jcef" type="repository">
+-        <properties maven-id="org.jetbrains.intellij.deps.jcef:jcef:137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50">
++        <properties maven-id="org.jetbrains.intellij.deps.jcef:jcef:137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28">
+           <verification>
+-            <artifact url="file://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50.jar">
+-              <sha256sum>b275a4fbff6f712768a937001ee4550fc7d2cde22bdb54c7bcecd9393aba7c13</sha256sum>
++            <artifact url="file://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar">
++              <sha256sum>1775368c2338d0cb00809e4c67a73c1577ac493a6d7ddc98ad361615f5a2b9f6</sha256sum>
+             </artifact>
+           </verification>
+         </properties>
+         <CLASSES>
+-          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50.jar!/" />
++          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar!/" />
+         </CLASSES>
+         <JAVADOC />
+         <SOURCES>
+-          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-261-b50-sources.jar!/" />
++          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28-sources.jar!/" />
+         </SOURCES>
+       </library>
+     </orderEntry>
+diff --git a/build/dependencies/dependencies.properties b/build/dependencies/dependencies.properties
+index 40e14477d83a..00320cf04d75 100644
+--- a/build/dependencies/dependencies.properties
++++ b/build/dependencies/dependencies.properties
+@@ -10,4 +10,4 @@ restarterBuild=243.6005
+ runtimeBuild=25.0.2b432.38
+ snapDockerImage=registry.jetbrains.team/p/ij/docker-hub/jetbrains/snapcraft@sha256:0059496b7a941e27937bc523621a336bddc1327de8dcd03f6b0bd0b57892ce43
+ toolboxBuild=3.2.0.65851
+-jcefBuild=261-b50
++jcefBuild=262-b28
+diff --git a/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt b/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
+index b973e95ddcbb..f141cadca447 100644
+--- a/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
++++ b/platform/build-scripts/src/org/jetbrains/intellij/build/CommunityRepositoryModules.kt
+@@ -370,6 +370,8 @@ object CommunityRepositoryModules {
+         Files.move(jcefOutputDir, targetDir.resolve("jcef"), StandardCopyOption.REPLACE_EXISTING)
+         Files.deleteIfExists(subDir)
+       }
++
++      spec.enableSymlinksAndExecutableResources()
+     }
+   }
+ 
+diff --git a/build/dependencies/dependencies.properties b/build/dependencies/dependencies.properties
+index 1271400cf646..d11f371244ff 100644
+--- a/build/dependencies/dependencies.properties
++++ b/build/dependencies/dependencies.properties
+@@ -3,7 +3,7 @@ bundledMavenVersion=3.9.14
+ debuggerAgent=1.2
+ gradleApiVersion=9.5.0-rc-2
+ gradleTAPI.jacksonCoreVersion=2.17.2
+-jcefBuild=262-b28
++jcefBuild=262-b34
+ jdkBuild=25.0.2b410.29
+ launcherBuild=262.4683
+ nsisBuild=3.11-1
+diff --git a/lib/BUILD.bazel b/lib/BUILD.bazel
+index 186f32cb04ec..b0ad4aa24f85 100644
+--- a/lib/BUILD.bazel
++++ b/lib/BUILD.bazel
+@@ -12220,17 +12220,17 @@ jvm_import(
+ )
+ 
+ copy_file(
+-  name = "org.jetbrains.intellij.deps.jcef/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar_copy",
+-  src = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28_http//file",
+-  out = "org.jetbrains.intellij.deps.jcef/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar",
++  name = "org.jetbrains.intellij.deps.jcef/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar_copy",
++  src = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34_http//file",
++  out = "org.jetbrains.intellij.deps.jcef/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar",
+   allow_symlink = True,
+   visibility = ["//visibility:public"]
+ )
+ 
+ jvm_import(
+   name = "libraries-jcef-jcef",
+-  jar = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28_http//file",
+-  source_jar = "@org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28-sources_http//file",
++  jar = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34_http//file",
++  source_jar = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34-sources_http//file",
+   visibility = ["//visibility:public"]
+ )
+ 
+diff --git a/lib/MODULE.bazel b/lib/MODULE.bazel
+index 00ff16fa83b4..e944cdb91dd1 100644
+--- a/lib/MODULE.bazel
++++ b/lib/MODULE.bazel
+@@ -9590,17 +9590,17 @@ http_file(
+ )
+ 
+ http_file(
+-  name = "org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28_http",
+-  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar",
+-  sha256 = "1775368c2338d0cb00809e4c67a73c1577ac493a6d7ddc98ad361615f5a2b9f6",
+-  downloaded_file_path = "jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar"
++  name = "org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34_http",
++  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar",
++  sha256 = "abfa1a12c6d04efd7833d1d936cdc8e201e0b6017c47d69e88f3fa269bda5e56",
++  downloaded_file_path = "jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar"
+ )
+ 
+ http_file(
+-  name = "org_jetbrains_intellij_deps_jcef-jcef-137_0_17-gf354b0e-chromium-137_0_7151_104-api-1_21-262-b28-sources_http",
+-  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28-sources.jar",
+-  sha256 = "a967641067ca79df40b2add9b84e220f2eb4d84623e5284184ef5d39b874cc58",
+-  downloaded_file_path = "jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28-sources.jar"
++  name = "org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34-sources_http",
++  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34-sources.jar",
++  sha256 = "f9b61698cb0cffb1281bbd7592e59b44d10b8852b16b29dba348373b27f5bcc4",
++  downloaded_file_path = "jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34-sources.jar"
+ )
+ 
+ http_file(
+diff --git a/libraries/jcef/intellij.libraries.jcef.iml b/libraries/jcef/intellij.libraries.jcef.iml
+index 193ddb53a77d..4824a34c3339 100644
+--- a/libraries/jcef/intellij.libraries.jcef.iml
++++ b/libraries/jcef/intellij.libraries.jcef.iml
+@@ -9,19 +9,19 @@
+     <orderEntry type="sourceFolder" forTests="false" />
+     <orderEntry type="module-library" exported="">
+       <library name="jcef" type="repository">
+-        <properties maven-id="org.jetbrains.intellij.deps.jcef:jcef:137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28">
++        <properties maven-id="org.jetbrains.intellij.deps.jcef:jcef:144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34">
+           <verification>
+-            <artifact url="file://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar">
+-              <sha256sum>1775368c2338d0cb00809e4c67a73c1577ac493a6d7ddc98ad361615f5a2b9f6</sha256sum>
++            <artifact url="file://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar">
++              <sha256sum>abfa1a12c6d04efd7833d1d936cdc8e201e0b6017c47d69e88f3fa269bda5e56</sha256sum>
+             </artifact>
+           </verification>
+         </properties>
+         <CLASSES>
+-          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28.jar!/" />
++          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar!/" />
+         </CLASSES>
+         <JAVADOC />
+         <SOURCES>
+-          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28/jcef-137.0.17-gf354b0e-chromium-137.0.7151.104-api-1.21-262-b28-sources.jar!/" />
++          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34-sources.jar!/" />
+         </SOURCES>
+       </library>
+     </orderEntry>
+diff --git a/libraries/jcef/module-content.yaml b/libraries/jcef/module-content.yaml
+index 53a21343f07e..4ae31210d41a 100644
+--- a/libraries/jcef/module-content.yaml
++++ b/libraries/jcef/module-content.yaml
+@@ -3,4 +3,4 @@
+   - name: intellij.libraries.jcef
+     libraries:
+       jcef:
+-      - name: $MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/137/jcef-137.jar
+\ No newline at end of file
++      - name: $MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144/jcef-144.jar
+\ No newline at end of file
+diff --git a/platform/platform-impl/internal/src/com/intellij/internal/jcef/test/rhtest/MyResourceHandler.kt b/platform/platform-impl/internal/src/com/intellij/internal/jcef/test/rhtest/MyResourceHandler.kt
+index 8886db25c839..f2db3d30e8a7 100644
+--- a/platform/platform-impl/internal/src/com/intellij/internal/jcef/test/rhtest/MyResourceHandler.kt
++++ b/platform/platform-impl/internal/src/com/intellij/internal/jcef/test/rhtest/MyResourceHandler.kt
+@@ -5,7 +5,7 @@ import com.intellij.internal.jcef.test.cases.DetailedFrame
+ import com.intellij.openapi.diagnostic.thisLogger
+ import org.cef.callback.CefCallback
+ import org.cef.handler.CefLoadHandler
+-import org.cef.handler.CefResourceHandler
++import org.cef.handler.CefResourceHandlerAdapter
+ import org.cef.misc.IntRef
+ import org.cef.misc.StringRef
+ import org.cef.network.CefRequest
+@@ -13,7 +13,7 @@ import org.cef.network.CefResponse
+ import java.io.IOException
+ import java.io.InputStream
+ 
+-internal class MyResourceHandler : CefResourceHandler {
++internal class MyResourceHandler : CefResourceHandlerAdapter() {
+ 
+     private var inputStream: InputStream? = null
+     private var resourceType: CefRequest.ResourceType? = null
+diff --git a/platform/ui.jcef/api-dump-unreviewed.txt b/platform/ui.jcef/api-dump-unreviewed.txt
+index d3e10dc946a0..61b80c076a28 100644
+--- a/platform/ui.jcef/api-dump-unreviewed.txt
++++ b/platform/ui.jcef/api-dump-unreviewed.txt
+@@ -269,7 +269,6 @@ c:com.intellij.ui.jcef.utils.JBCefLocalRequestHandler
+ - getResourceRequestHandler(org.cef.browser.CefBrowser,org.cef.browser.CefFrame,org.cef.network.CefRequest,Z,Z,java.lang.String,org.cef.misc.BoolRef):org.cef.handler.CefResourceRequestHandler
+ c:com.intellij.ui.jcef.utils.JBCefStreamResourceHandler
+ - com.intellij.openapi.Disposable
+-- org.cef.handler.CefResourceHandler
+ - <init>(java.io.InputStream,java.lang.String,com.intellij.openapi.Disposable,java.util.Map):V
+ - b:<init>(java.io.InputStream,java.lang.String,com.intellij.openapi.Disposable,java.util.Map,I,kotlin.jvm.internal.DefaultConstructorMarker):V
+ - cancel():V
+diff --git a/platform/ui.jcef/api-dump.txt b/platform/ui.jcef/api-dump.txt
+index 9d0abcbe0c3c..0a19cd2bb175 100644
+--- a/platform/ui.jcef/api-dump.txt
++++ b/platform/ui.jcef/api-dump.txt
+@@ -13,3 +13,5 @@ com.intellij.ui.jcef.JBCefOSRHandlerFactory
+ - createComponent(Z):javax.swing.JComponent
+ - createScreenBoundsProvider():com.intellij.util.Function
+ - s:getInstance():com.intellij.ui.jcef.JBCefOSRHandlerFactory
++c:com.intellij.ui.jcef.utils.JBCefStreamResourceHandler
++- org.cef.handler.CefResourceHandlerAdapter
+diff --git a/platform/ui.jcef/exposed-third-party-api.txt b/platform/ui.jcef/exposed-third-party-api.txt
+index b246fe128bd2..0d17e99ae844 100644
+--- a/platform/ui.jcef/exposed-third-party-api.txt
++++ b/platform/ui.jcef/exposed-third-party-api.txt
+@@ -26,7 +26,7 @@ org/cef/handler/CefPermissionHandler
+ org/cef/handler/CefRenderHandler
+ org/cef/handler/CefRequestHandler
+ org/cef/handler/CefRequestHandlerAdapter
+-org/cef/handler/CefResourceHandler
++org/cef/handler/CefResourceHandlerAdapter
+ org/cef/handler/CefResourceRequestHandler
+ org/cef/misc/BoolRef
+ org/cef/misc/IntRef
+diff --git a/platform/ui.jcef/jcef/utils/JBCefStreamResourceHandler.kt b/platform/ui.jcef/jcef/utils/JBCefStreamResourceHandler.kt
+index 48d83d92cb2b..d4ff71288098 100644
+--- a/platform/ui.jcef/jcef/utils/JBCefStreamResourceHandler.kt
++++ b/platform/ui.jcef/jcef/utils/JBCefStreamResourceHandler.kt
+@@ -5,7 +5,7 @@ import com.intellij.openapi.Disposable
+ import com.intellij.openapi.diagnostic.Logger
+ import com.intellij.openapi.util.Disposer
+ import org.cef.callback.CefCallback
+-import org.cef.handler.CefResourceHandler
++import org.cef.handler.CefResourceHandlerAdapter
+ import org.cef.misc.IntRef
+ import org.cef.misc.StringRef
+ import org.cef.network.CefRequest
+@@ -29,7 +29,7 @@ open class JBCefStreamResourceHandler(
+   private val myMimeType: String,
+   parent: Disposable,
+   private val headers: Map<String, String> = mapOf(),
+-) : CefResourceHandler, Disposable {
++) : CefResourceHandlerAdapter(), Disposable {
+   init {
+     Disposer.register(parent, this)
+   }
+diff --git a/plugins/markdown/test/src/org/intellij/plugins/markdown/preview/jcef/MarkdownPreviewSecurityTest.kt b/plugins/markdown/test/src/org/intellij/plugins/markdown/preview/jcef/MarkdownPreviewSecurityTest.kt
+index ce00a2a34db4..5714c5e1fb73 100644
+--- a/plugins/markdown/test/src/org/intellij/plugins/markdown/preview/jcef/MarkdownPreviewSecurityTest.kt
++++ b/plugins/markdown/test/src/org/intellij/plugins/markdown/preview/jcef/MarkdownPreviewSecurityTest.kt
+@@ -124,7 +124,9 @@ class MarkdownPreviewSecurityTest: MarkdownJcefTestCase() {
+       }
+     }
+ 
+-    assertTrue(message.contains("Refused to load the script 'https://evil.example.com/some-script.js'"))
++    val blocked = message.contains("Refused to load the script 'https://evil.example.com/some-script.js'") ||
++                  message.contains("The action has been blocked.")
++    assertTrue(blocked, "Expected blocked script message but got: '$message'")
+   }
+ 
+   @Timeout(TIMEOUT)
+@@ -164,7 +166,12 @@ class MarkdownPreviewSecurityTest: MarkdownJcefTestCase() {
+       }
+     }
+ 
+-    assertTrue(message.contains("Refused to execute inline script because it violates the following Content Security Policy directive"))
++    val blocked =
++      // CEF 137
++      message.contains("Refused to execute inline script because it violates the following Content Security Policy directive") ||
++      // CEF 144
++      message.contains("The action has been blocked.")
++    assertTrue(blocked, "Expected blocked script message but got: '$message'")
+   }
+ 
+   companion object {
+diff --git a/build/dependencies/dependencies.properties b/build/dependencies/dependencies.properties
+index 45f0c5ac1e35..d07956fa2a12 100644
+--- a/build/dependencies/dependencies.properties
++++ b/build/dependencies/dependencies.properties
+@@ -3,7 +3,7 @@ bundledMavenVersion=3.9.14
+ debuggerAgent=1.2
+ gradleApiVersion=9.5.0
+ gradleTAPI.jacksonCoreVersion=2.17.2
+-jcefBuild=262-b34
++jcefBuild=262-b37
+ jdkBuild=25.0.2b410.29
+ launcherBuild=262.4683
+ nsisBuild=3.11-1
+diff --git a/lib/BUILD.bazel b/lib/BUILD.bazel
+index 112b2833bf0c..e85b2d37fe15 100644
+--- a/lib/BUILD.bazel
++++ b/lib/BUILD.bazel
+@@ -12220,17 +12220,17 @@ jvm_import(
+ )
+ 
+ copy_file(
+-  name = "org.jetbrains.intellij.deps.jcef/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar_copy",
+-  src = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34_http//file",
+-  out = "org.jetbrains.intellij.deps.jcef/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar",
++  name = "org.jetbrains.intellij.deps.jcef/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37.jar_copy",
++  src = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b37_http//file",
++  out = "org.jetbrains.intellij.deps.jcef/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37.jar",
+   allow_symlink = True,
+   visibility = ["//visibility:public"]
+ )
+ 
+ jvm_import(
+   name = "libraries-jcef-jcef",
+-  jar = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34_http//file",
+-  source_jar = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34-sources_http//file",
++  jar = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b37_http//file",
++  source_jar = "@org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b37-sources_http//file",
+   visibility = ["//visibility:public"]
+ )
+ 
+diff --git a/lib/MODULE.bazel b/lib/MODULE.bazel
+index b0e6b3a6332d..32f699231313 100644
+--- a/lib/MODULE.bazel
++++ b/lib/MODULE.bazel
+@@ -9590,17 +9590,17 @@ http_file(
+ )
+ 
+ http_file(
+-  name = "org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34_http",
+-  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar",
+-  sha256 = "abfa1a12c6d04efd7833d1d936cdc8e201e0b6017c47d69e88f3fa269bda5e56",
+-  downloaded_file_path = "jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar"
++  name = "org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b37_http",
++  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37.jar",
++  sha256 = "1899c0290d492ecb45ff2e12b9fbf63e52b262e989d55da8eb40812bf8a06030",
++  downloaded_file_path = "jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37.jar"
+ )
+ 
+ http_file(
+-  name = "org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b34-sources_http",
+-  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34-sources.jar",
+-  sha256 = "f9b61698cb0cffb1281bbd7592e59b44d10b8852b16b29dba348373b27f5bcc4",
+-  downloaded_file_path = "jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34-sources.jar"
++  name = "org_jetbrains_intellij_deps_jcef-jcef-144_0_15-g72717cf-chromium-144_0_7559_172-api-1_21-262-b37-sources_http",
++  url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37-sources.jar",
++  sha256 = "d6bdb53acf704f3208eaf3c50cc6c8847b71631bc01642c3d14a03bd22005496",
++  downloaded_file_path = "jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37-sources.jar"
+ )
+ 
+ http_file(
+diff --git a/libraries/jcef/intellij.libraries.jcef.iml b/libraries/jcef/intellij.libraries.jcef.iml
+index 4824a34c3339..145c68ee98d6 100644
+--- a/libraries/jcef/intellij.libraries.jcef.iml
++++ b/libraries/jcef/intellij.libraries.jcef.iml
+@@ -9,19 +9,19 @@
+     <orderEntry type="sourceFolder" forTests="false" />
+     <orderEntry type="module-library" exported="">
+       <library name="jcef" type="repository">
+-        <properties maven-id="org.jetbrains.intellij.deps.jcef:jcef:144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34">
++        <properties maven-id="org.jetbrains.intellij.deps.jcef:jcef:144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37">
+           <verification>
+-            <artifact url="file://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar">
+-              <sha256sum>abfa1a12c6d04efd7833d1d936cdc8e201e0b6017c47d69e88f3fa269bda5e56</sha256sum>
++            <artifact url="file://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37.jar">
++              <sha256sum>1899c0290d492ecb45ff2e12b9fbf63e52b262e989d55da8eb40812bf8a06030</sha256sum>
+             </artifact>
+           </verification>
+         </properties>
+         <CLASSES>
+-          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34.jar!/" />
++          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37.jar!/" />
+         </CLASSES>
+         <JAVADOC />
+         <SOURCES>
+-          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b34-sources.jar!/" />
++          <root url="jar://$MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/jcef/jcef/144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37/jcef-144.0.15-g72717cf-chromium-144.0.7559.172-api-1.21-262-b37-sources.jar!/" />
+         </SOURCES>
+       </library>
+     </orderEntry>
