@@ -1,0 +1,224 @@
+From f07d1eb593804432c219fb0324b2f24dfc948411 Mon Sep 17 00:00:00 2001
+From: Artem Bochkarev <artem.bochkarev@jetbrains.com>
+Date: Sun, 19 Apr 2026 10:31:24 +0400
+Subject: [PATCH] IJPL-242830 Check whether CEF version was updated
+
+and clean jcef_cache folder if necessary
+
+(cherry picked from commit c8500066d4a6b4be53de83567e456c5b48ca3a9c)
+
+IJ-CR-201553
+
+GitOrigin-RevId: 1bf8d271127810b3aa93d057123fdbcc5d5b4110
+---
+ .../resources/messages/IdeBundle.properties   |  3 +
+ platform/ui.jcef/jcef/JBCefApp.java           | 80 +++++++++++++++++--
+ platform/ui.jcef/jcef/JBCefNotifications.java | 13 +++
+ 3 files changed, 90 insertions(+), 6 deletions(-)
+
+diff --git a/platform/platform-api/resources/messages/IdeBundle.properties b/platform/platform-api/resources/messages/IdeBundle.properties
+index 316f39f3d4c6..b4491d27b71c 100644
+--- a/platform/platform-api/resources/messages/IdeBundle.properties
++++ b/platform/platform-api/resources/messages/IdeBundle.properties
+@@ -2673,6 +2673,9 @@ notification.content.jcef.enable.browser.dialog.message=<html>\
+   <a href="https://youtrack.jetbrains.com/articles/JBR-A-11">Learn more\u2026</a>\
+   </html>
+ 
++notification.content.jcef.clearcache.title=Failed to clear JCEF caches automatically.
++notification.content.jcef.clearcache.message=JCEF version was updated. It is better to clear jcef cache folder (otherwise jcef may work unstably): {0}.
++
+ notification.title.jcef.measureFPS=OSR JCEF FPS Meter
+ notification.content.jcef.measureFPS=Press any key or switch focus to stop
+ action.jcef.restart=Restart
+diff --git a/platform/ui.jcef/jcef/JBCefApp.java b/platform/ui.jcef/jcef/JBCefApp.java
+index c2cf717c0a41..d60a00bcb87c 100644
+--- a/platform/ui.jcef/jcef/JBCefApp.java
++++ b/platform/ui.jcef/jcef/JBCefApp.java
+@@ -2,6 +2,7 @@
+ package com.intellij.ui.jcef;
+ 
+ import com.intellij.execution.Platform;
++import com.intellij.ide.util.PropertiesComponent;
+ import com.intellij.notification.NotificationGroup;
+ import com.intellij.openapi.Disposable;
+ import com.intellij.openapi.actionSystem.AnAction;
+@@ -14,6 +15,7 @@ import com.intellij.openapi.progress.Cancellation;
+ import com.intellij.openapi.util.Disposer;
+ import com.intellij.openapi.util.SystemInfo;
+ import com.intellij.openapi.util.Version;
++import com.intellij.openapi.util.io.NioFiles;
+ import com.intellij.openapi.util.registry.RegistryManager;
+ import com.intellij.ui.JreHiDpiUtil;
+ import com.intellij.ui.scale.DerivedScaleType;
+@@ -48,6 +50,7 @@ import java.io.File;
+ import java.io.IOException;
+ import java.net.URL;
+ import java.nio.file.Files;
++import java.nio.file.InvalidPathException;
+ import java.nio.file.Path;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+@@ -77,10 +80,15 @@ public final class JBCefApp {
+   private static final boolean SKIP_VERSION_CHECK = Boolean.getBoolean("ide.browser.jcef.skip_version_check");
+   private static final String REGISTRY_REMOTE_KEY = "ide.browser.jcef.out-of-process.enabled";
+ 
++  private static JCefVersionDetails VERSION_DETAILS = null;
+   private static final int MIN_SUPPORTED_CEF_MAJOR_VERSION = 119;
+   private static final int MIN_SUPPORTED_JCEF_API_MAJOR_VERSION = 1;
+   private static final int MIN_SUPPORTED_JCEF_API_MINOR_VERSION = 20;
+ 
++  private static final int    SETTINGS_CEF_VERSION_DEFAULT_VAL = 137;  // NOTE: this check is appeared when CEF 137 is used.
++  private static final String SETTINGS_CEF_VERSION_KEY = "cef_version_last_used";
++  private static final String SETTINGS_CEF_TEMP_CACHE_KEY = "cef_cleanup_temporary_cache_folder";
++
+   private static final String MIN_SUPPORTED_GLIBC_DEFAULT = "2.28.0";
+ 
+   private static final AtomicInteger CEFAPP_INSTANCE_COUNT = new AtomicInteger(0);
+@@ -184,6 +192,8 @@ public final class JBCefApp {
+       if (settings.log_severity != CefSettings.LogSeverity.LOGSEVERITY_DISABLE || settings.log_file != null || logPath != null)
+         LOG.info(String.format("JCEF logging: level=%s, file=%s, chromium_log=%s", settings.log_severity, logPath, settings.log_file));
+ 
++      checkCEFVersionUpdate(settings);
++
+       myCefArgs = args;
+       CefApp.addAppHandler(new MyCefAppHandler(args, trackGPUCrashes.get()));
+       myCefSettings = settings;
+@@ -230,6 +240,58 @@ public final class JBCefApp {
+     Disposer.register(ApplicationManager.getApplication(), myDisposable);
+   }
+ 
++  private static void checkCEFVersionUpdate(CefSettings settings) {
++    JCefVersionDetails version = getVersionDetails();
++    if (version == null) // NOTE: should always be FALSE (otherwise isSupported will return false and we won't execute JBCefApp ctor).
++      return;
++
++    final PropertiesComponent props = PropertiesComponent.getInstance();
++    final int cefVersionLast = props.getInt(SETTINGS_CEF_VERSION_KEY, SETTINGS_CEF_VERSION_DEFAULT_VAL);
++    final int cefVersionCurrent = version.cefVersion.major;
++    if (cefVersionCurrent != cefVersionLast) {
++      // NOTE: settings.cache_path is always not null
++      Path cache_path = Path.of(settings.cache_path);
++      Path tmp_cache_path = cache_path.getParent().resolve("jcef_cache_temp");
++      settings.cache_path = tmp_cache_path.toString();
++      LOG.info(String.format(
++        "JCEF: CEF version has been updated from %d to %d. Cache folder '%s' will be cleared in bg thread, CEF will be started with temporary cache folder '%s'",
++        cefVersionLast, cefVersionCurrent, cache_path, tmp_cache_path));
++
++      ApplicationManager.getApplication().executeOnPooledThread(() -> {
++        props.setValue(SETTINGS_CEF_VERSION_KEY, cefVersionCurrent, SETTINGS_CEF_VERSION_DEFAULT_VAL);
++        props.setValue(SETTINGS_CEF_TEMP_CACHE_KEY, tmp_cache_path.toString());
++
++        try {
++          NioFiles.deleteRecursively(cache_path);
++        } catch (IOException e) {
++          LOG.info(String.format("JCEF: Failed to delete cache folder '%s', error: %s", cache_path, e.getMessage()));
++          JBCefNotifications.showClearCache(cache_path);
++        }
++      });
++    } else {
++      final String tempCache = props.getValue(SETTINGS_CEF_TEMP_CACHE_KEY);
++      if (tempCache != null && !tempCache.isEmpty()) {
++        props.setValue(SETTINGS_CEF_TEMP_CACHE_KEY, null);
++        ApplicationManager.getApplication().executeOnPooledThread(() -> {
++          Path tmp = null;
++          try {
++            tmp = Path.of(tempCache);
++          } catch (InvalidPathException e) {
++            LOG.debug(String.format("JCEF: Invalid temporary cache path '%s', error: %s", tempCache, e.getMessage()));
++          }
++          if (tmp != null) {
++            try {
++              NioFiles.deleteRecursively(tmp);
++              LOG.info(String.format("JCEF: Deleted temporary cache folder '%s'", tempCache));
++            } catch (IOException e) {
++              LOG.info(String.format("JCEF: Failed to delete temporary cache folder '%s', error: %s", tempCache, e.getMessage()));
++            }
++          }
++        });
++      }
++    }
++  }
++
+   private boolean restartJCEF(boolean withVerboseLogging, boolean withNewCachePath) {
+     if (!myIsRemoteEnabled) {
+       return false;
+@@ -389,13 +451,10 @@ public final class JBCefApp {
+     }
+ 
+     if (!SKIP_VERSION_CHECK) {
+-      JCefVersionDetails version;
+-      try {
+-        version = JCefAppConfig.getVersionDetails();
+-      }
+-      catch (Throwable e) {
++      JCefVersionDetails version = getVersionDetails();
++      if (version == null)
+         return unsupported.apply("JCEF runtime version is not supported");
+-      }
++
+       if (MIN_SUPPORTED_CEF_MAJOR_VERSION > version.cefVersion.major) {
+         return unsupported.apply("JCEF: minimum supported CEF major version is " + MIN_SUPPORTED_CEF_MAJOR_VERSION +
+                                  ", current is " + version.cefVersion.major);
+@@ -412,6 +471,15 @@ public final class JBCefApp {
+     return isJcefFromJbr() || getNativeBundlePath() != null;
+   }
+ 
++  private static JCefVersionDetails getVersionDetails() {
++    if (VERSION_DETAILS == null) {
++      try {
++        VERSION_DETAILS = JCefAppConfig.getVersionDetails();
++      } catch (Throwable ignored) {}
++    }
++    return VERSION_DETAILS;
++  }
++
+   private static boolean isJcefFromJbr() {
+     URL url = JCefAppConfig.class.getResource("JCefAppConfig.class");
+     if (url == null) {
+diff --git a/platform/ui.jcef/jcef/JBCefNotifications.java b/platform/ui.jcef/jcef/JBCefNotifications.java
+index f052d0d72ec0..987b9eb4dc17 100644
+--- a/platform/ui.jcef/jcef/JBCefNotifications.java
++++ b/platform/ui.jcef/jcef/JBCefNotifications.java
+@@ -8,12 +8,14 @@ import com.intellij.notification.NotificationAction;
+ import com.intellij.notification.NotificationType;
+ import com.intellij.notification.Notifications;
+ import com.intellij.openapi.actionSystem.AnAction;
++import com.intellij.openapi.actionSystem.AnActionEvent;
+ import com.intellij.openapi.application.ApplicationManager;
+ import com.intellij.openapi.editor.Editor;
+ import com.intellij.openapi.util.registry.RegistryManager;
+ import com.intellij.ui.EditorNotificationPanel;
+ import com.intellij.ui.LightColors;
+ import org.jetbrains.annotations.Nls;
++import org.jetbrains.annotations.NotNull;
+ import org.jetbrains.annotations.Nullable;
+ 
+ import javax.swing.JComponent;
+@@ -22,6 +24,7 @@ import javax.swing.JPanel;
+ import java.awt.Component;
+ import java.awt.GridBagConstraints;
+ import java.awt.GridBagLayout;
++import java.nio.file.Path;
+ 
+ public final class JBCefNotifications {
+   public static @Nullable EditorNotificationPanel createEditorNotificationPanel(Editor editor, JBCefHealthMonitor.Status status) {
+@@ -88,6 +91,16 @@ public final class JBCefNotifications {
+     Notifications.Bus.notify(notification);
+   }
+ 
++  static void showClearCache(Path cachePath) {
++    // NOTE: called from pooled bg thread.
++    Notification notification = JBCefApp.getNotificationGroup().createNotification(
++      IdeBundle.message("notification.content.jcef.clearcache.title"),
++      IdeBundle.message("notification.content.jcef.clearcache.message", cachePath.toString()),
++      NotificationType.WARNING);
++
++    notification.notify(null);
++  }
++
+   private static JComponent createUnprivilegedUserNSStubPanel() {
+     return JBCefAppArmorUtils.getUnprivilegedUserNamespacesRestrictedStubPanel();
+   }
+-- 
+2.53.0
+

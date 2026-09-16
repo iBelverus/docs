@@ -1,0 +1,136 @@
+From 71cb2829f107e0898f3ee2c9edef510945aca7cc Mon Sep 17 00:00:00 2001
+From: Ilia Permiashkin <ilia.permiashkin@jetbrains.com>
+Date: Thu, 7 May 2026 10:54:42 +0000
+Subject: [PATCH] [markdown] IJPL-171896 Markdown preview doesn't render images
+ from outside the project
+
+Co-authored-by: Peter Gromov <peter.gromov@jetbrains.com>
+
+Merge-request: IJ-MR-197960
+Merged-by: Ilia Permiashkin <ilia.permiashkin@jetbrains.com>
+(cherry picked from commit c1109fac6fbbf1e3f8d174ca517c4f65a993bd9b)
+
+GitOrigin-RevId: 8644a3cbd1e9d3f785b35137e6720d4932f4e158
+---
+ .../jcef/impl/FileSchemeResourcesProcessor.kt | 28 +++++++++++-----
+ .../jcef/impl/IncrementalDOMBuilder.kt        | 33 ++++++++++++-------
+ 2 files changed, 41 insertions(+), 20 deletions(-)
+
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
+index 5411fd184454..ed1842e4e49b 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/FileSchemeResourcesProcessor.kt
+@@ -1,11 +1,12 @@
+ // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+ package org.intellij.plugins.markdown.ui.preview.jcef.impl
+ 
+-import com.intellij.openapi.vfs.VfsUtil
+ import com.intellij.openapi.vfs.VirtualFile
++import com.intellij.openapi.vfs.VirtualFileManager
++import com.intellij.openapi.vfs.toNioPathOrNull
+ import org.intellij.plugins.markdown.ui.preview.ResourceProvider
+-import java.io.File
+-import java.net.URL
++import java.nio.file.Files
++import java.nio.file.Path
+ 
+ internal class FileSchemeResourcesProcessor(
+   private val baseFile: VirtualFile?,
+@@ -16,11 +17,20 @@ internal class FileSchemeResourcesProcessor(
+   }
+ 
+   override fun loadResource(resourceName: String): ResourceProvider.Resource? {
+-    val resource = if (resourceName.startsWith("file:/")) {
+-      VfsUtil.findFileByIoFile(File(URL(resourceName).path), true)
+-    } else {
+-      projectRoot?.findFileByRelativePath(resourceName)
+-    } ?: return null
+-    return ResourceProvider.loadExternalResource(resource)
++    val resourcePath = Path.of(resourceName)
++    if (isChildOfProjectRoot(resourcePath)) {
++      val resource = VirtualFileManager.getInstance().refreshAndFindFileByNioPath(resourcePath) ?: return null
++      return ResourceProvider.loadExternalResource(resource)
++    }
++
++    return runCatching {
++      if (!Files.isRegularFile(resourcePath)) return null
++      ResourceProvider.loadExternalResource(resourcePath)
++    }.getOrNull()
++  }
++
++  private fun isChildOfProjectRoot(resourcePath: Path): Boolean {
++    val projectPath = projectRoot?.toNioPathOrNull() ?: return false
++    return resourcePath.startsWith(projectPath)
+   }
+ }
+diff --git a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
+index 7df415ba5314..ee89c1e5a50c 100644
+--- a/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
++++ b/plugins/markdown/core/src/org/intellij/plugins/markdown/ui/preview/jcef/impl/IncrementalDOMBuilder.kt
+@@ -1,13 +1,14 @@
+ // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+ package org.intellij.plugins.markdown.ui.preview.jcef.impl
+ 
++import com.intellij.ide.trustedProjects.TrustedProjects.isProjectTrusted
+ import com.intellij.openapi.diagnostic.thisLogger
+ import com.intellij.openapi.progress.ProgressManager
+ import com.intellij.openapi.util.SystemInfo
+ import com.intellij.openapi.util.io.FileUtil
+ import com.intellij.openapi.util.text.StringUtil
+-import com.intellij.openapi.vfs.VfsUtilCore
+ import com.intellij.openapi.vfs.VirtualFile
++import com.intellij.openapi.vfs.toNioPathOrNull
+ import org.intellij.plugins.markdown.ui.preview.PreviewStaticServer
+ import org.intellij.plugins.markdown.ui.preview.ResourceProvider
+ import org.intellij.plugins.markdown.ui.preview.html.PreviewEncodingUtil
+@@ -119,6 +120,9 @@ class IncrementalDOMBuilder(
+   }
+ 
+   private fun actuallyProcessImageNode(node: Node, baseFile: VirtualFile, projectRoot: VirtualFile) {
++    val fileSchemeResourceProcessor = fileSchemeResourceProcessor ?: return
++    val projectPath = projectRoot.toNioPathOrNull() ?: return
++
+     var path = node.attr("src")
+     val hasFileHost = path.startsWith("file:/")
+     if (hasFileHost && !node.hasAttr("from-extension")) {
+@@ -129,20 +133,27 @@ class IncrementalDOMBuilder(
+       if (SystemInfo.isWindows) {
+         path = StringUtil.replace(path, "\\", "/")
+       }
++
+       if (!path.startsWith('/')) {
+-        val resolved = baseFile.findFileByRelativePath(path) ?: return
+-        path = VfsUtilCore.getRelativePath(resolved, projectRoot) ?: path
+-      }
+-      if (SystemInfo.isWindows && path.startsWith("/")) {
+-        path = path.trimStart('/')
++        path = findRelativePath(baseFile, path) ?: return
++      } else {
++        if (SystemInfo.isWindows) {
++          path = path.trimStart('/')
++        }
++        path = findRelativePath(projectRoot, path) ?: path
+       }
+       path = FileUtil.toSystemIndependentName(path)
+     }
+-    if (fileSchemeResourceProcessor != null) {
+-      val processed = PreviewStaticServer.getStaticUrl(fileSchemeResourceProcessor, path)
+-      node.attr("data-original-src", path)
+-      node.attr("src", processed)
+-    }
++
++    if (!hasFileHost && !isProjectTrusted(projectPath) && !path.startsWith(projectPath.toString())) return
++
++    val processed = PreviewStaticServer.getStaticUrl(fileSchemeResourceProcessor, path)
++    node.attr("data-original-src", path)
++    node.attr("src", processed)
++  }
++
++  private fun findRelativePath(baseFile: VirtualFile, relPath: String): String? {
++    return baseFile.findFileByRelativePath(relPath)?.toNioPathOrNull()?.normalize()?.toString()
+   }
+ 
+   private fun shouldPreprocessImageNode(node: Node): Boolean {
+-- 
+2.53.0
+
