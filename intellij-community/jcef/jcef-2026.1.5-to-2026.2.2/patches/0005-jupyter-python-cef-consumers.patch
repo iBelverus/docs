@@ -1,6 +1,7 @@
 # JCEF/CEF changes: Jupyter/Python CEF consumers
 # Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
-# Apply with: git apply 0005-jupyter-python-cef-consumers.patch
+# Reference: grouped per-commit diffs for review (not a single apply-able diff).
+# To apply the changes, use combined-2026.1.5-to-2026.2.2.patch.
 #
 #   dc63d7121c3d6b9720b4a0e831de525b794fa751 2026-05-06 Nikita.Ashihmin | PY-89532 Jupyter: rewrite CEF sync to v2
 #   ddd7464712dcf9a3f36782613495c7b3a47dbabd 2026-07-20 Konstantin Bulenkov | IJPL-250575 Scroll trap on the What's New page

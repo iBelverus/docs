@@ -1,6 +1,7 @@
 # JCEF/CEF changes: CEF 137->144 and native bundles (IJPL-203516, IJPL-243802, IJPL-244083)
 # Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
-# Apply with: git apply 0001-cef-144-and-native-bundles.patch
+# Reference: grouped per-commit diffs for review (not a single apply-able diff).
+# To apply the changes, use combined-2026.1.5-to-2026.2.2.patch.
 #
 #   e79a28c88a0a6f7c8cc34496d4bc1aa0373270a7 2026-02-11 Yuriy Artamonov | [jcef] IJPL-203516 Build JCEF plugin with native bundles
 #   706518f3193f341c2498852bc7836f51d978c66a 2026-02-11 Yuriy Artamonov | [jcef] IJPL-203516 Update product layouts

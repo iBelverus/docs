@@ -1,6 +1,7 @@
 # JCEF/CEF changes: Platform JCEF runtime fixes
 # Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
-# Apply with: git apply 0003-platform-jcef-runtime-fixes.patch
+# Reference: grouped per-commit diffs for review (not a single apply-able diff).
+# To apply the changes, use combined-2026.1.5-to-2026.2.2.patch.
 #
 #   6131d90e76b23ba21cdf728aeafa640b0a79c5cf 2026-04-19 Artem Bochkarev | IJPL-231717 Don't set new CefAppHandler before jcef restart
 #   1dd73654b7da34d16336480430c1815a476aa05c 2026-04-19 Artem Bochkarev | IJPL-242830 Check whether CEF version was updated

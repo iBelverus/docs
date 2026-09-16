@@ -1,6 +1,7 @@
 # JCEF/CEF changes: JCEF content-modules refactor (IJPL-246446, IJPL-248275)
 # Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
-# Apply with: git apply 0002-jcef-content-modules-refactor.patch
+# Reference: grouped per-commit diffs for review (not a single apply-able diff).
+# To apply the changes, use combined-2026.1.5-to-2026.2.2.patch.
 #
 #   6cb976acd581d1c190da41ef14765790f630eaf1 2026-06-05 Vladimir Krivosheev | IJPL-246446 publish JCEF API as a bundled library plugin
 #   b6c05fe0b33e6a6011682ba6acd098610fa2c11b 2026-06-05 Vladimir Krivosheev | IJPL-246446 add optional platform extension points for JCEF UI

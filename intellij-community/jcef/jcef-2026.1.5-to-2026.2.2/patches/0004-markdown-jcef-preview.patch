@@ -1,6 +1,7 @@
 # JCEF/CEF changes: Markdown JCEF preview fixes
 # Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
-# Apply with: git apply 0004-markdown-jcef-preview.patch
+# Reference: grouped per-commit diffs for review (not a single apply-able diff).
+# To apply the changes, use combined-2026.1.5-to-2026.2.2.patch.
 #
 #   06c2304250ab7de0ebf3ca739f375f3ffa205e66 2026-04-07 Ekaterina Berezhko | [Markdown][IJPL-91133] Fix OSR scroll speed by accounting for scrollAmount in wheel rotation
 #   a3e9217e378ecc775029d33aab14ea4cd2a84fdf 2026-04-14 Ekaterina Berezhko | [Markdown][IJPL-236346] Fix Markdown HTML export losing styles after jsoup 1.21.2 upgrade
