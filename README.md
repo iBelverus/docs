@@ -18,6 +18,10 @@ intellij-community/
     │       ├── 0001-IJPL-242830-check-cef-version.patch
     │       ├── 0002-IJPL-242830-clear-caches-macos.patch
     │       ├── 0003-IJPL-171896-markdown-images.patch
+    │       ├── 0004-IJI-3336-jbr-25.0.2b329.117.patch
+    │       ├── 0005-IJI-3336-jbr-25.0.2b329.123.patch
+    │       ├── 0006-IJI-3336-jbr-25.0.3b329.124.patch
+    │       ├── 0007-IJI-3336-jbr-25.0.4b329.128.patch
     │       └── combined-2026.1.1-to-2026.1.5.patch
     └── jcef-2026.1.5-to-2026.2.2/
         ├── jcef-cef-changes-2026.1.5-to-2026.2.2.md

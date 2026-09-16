@@ -18,6 +18,10 @@ unchanged: both tags resolve to `org/jetbrains/intellij/deps/jcef/jcef/137/jcef-
 (`libraries/jcef/module-content.yaml`), so there is no CEF binary/native
 version bump in this range.
 
+The **JetBrains Runtime (JBR)** `runtimeBuild` dependency is also tracked in
+this report: it was promoted by 4 bot commits (see the "JetBrains Runtime (JBR)
+update" section below), though it carries no CEF version change.
+
 ## Summary
 
 | # | Commit | Date | Issue | Title | Files |
@@ -93,6 +97,30 @@ images.
     (`TrustedProjects.isProjectTrusted`) gating out-of-project image loading;
     path normalization via `toNioPathOrNull().normalize()`.
 
+## JetBrains Runtime (JBR) update
+
+The `runtimeBuild` dependency (the bundled JetBrains Runtime) was promoted by
+four `runtime-promotion-bot-noreply` commits (all `IJI-3336`), each a single
+line in `build/dependencies/dependencies.properties`:
+
+| # | Commit | Date | From | To |
+|---|--------|------|------|----|
+| 4 | `21e28680d4a3` | 2026-04-21 | 25.0.2b329.111 | 25.0.2b329.117 |
+| 5 | `2c3a1abc3bb7` | 2026-04-29 | 25.0.2b329.117 | 25.0.2b329.123 |
+| 6 | `05dfc9c5f742` | 2026-05-09 | 25.0.2b329.123 | 25.0.3b329.124 |
+| 7 | `239e49921edf` | 2026-08-03 | 25.0.3b329.124 | 25.0.4b329.128 |
+
+Net effect: `runtimeBuild` `25.0.2b329.117` → `25.0.4b329.128` (JBR 25.0.2 →
+25.0.4).
+
+**Relationship to JCEF/CEF:** JBR is the delivery vehicle for the native CEF —
+`JBCefApp` selects the native source via `isJcefFromJbr()` (CEF bundled in JBR
+vs. a standalone native bundle). These JBR patch releases carried **no CEF
+version change**, however: CEF remained 137 (`jcef-137.jar`) in both tags. The
+two IJPL-242830 commits (#1/#2) are the JCEF-side cache-management logic that
+reacts to a CEF version change arriving via JBR; because the CEF version stayed
+constant here, commit #2 was added as a build-version-gated macOS workaround.
+
 ## Risk / Impact Assessment
 
 - **Commits #1 & #2** alter JCEF startup caching behavior. The logic is guarded
@@ -103,10 +131,17 @@ images.
 - **Commit #3** changes markdown preview image resolution. It tightens security
   by refusing untrusted out-of-project images, which is a behavior improvement
   but could regress legitimate external-image rendering in untrusted projects.
+- **JBR update (#4–#7)** bumps the bundled JetBrains Runtime 25.0.2 → 25.0.4
+  with no CEF version change. Low JCEF-specific risk, but the runtime promotion
+  can introduce unrelated JBR behavior changes.
 
 ## Artifacts
 
 - `patches/0001-IJPL-242830-check-cef-version.patch`
 - `patches/0002-IJPL-242830-clear-caches-macos.patch`
 - `patches/0003-IJPL-171896-markdown-images.patch`
+- `patches/0004-IJI-3336-jbr-25.0.2b329.117.patch`
+- `patches/0005-IJI-3336-jbr-25.0.2b329.123.patch`
+- `patches/0006-IJI-3336-jbr-25.0.3b329.124.patch`
+- `patches/0007-IJI-3336-jbr-25.0.4b329.128.patch`
 - `patches/combined-2026.1.1-to-2026.1.5.patch`

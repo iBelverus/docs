@@ -1,0 +1,27 @@
+From 2c3a1abc3bb72123c6e8ccc7164a9af90d4c804f Mon Sep 17 00:00:00 2001
+From: runtime-promotion-bot-noreply
+ <runtime-promotion-bot-noreply@jetbrains.com>
+Date: Wed, 29 Apr 2026 22:36:27 +0000
+Subject: [PATCH] IJI-3336 Updating versions of project dependencies:
+ runtimeBuild->25.0.2b329.123
+
+GitOrigin-RevId: d4331ee73e2bea0492f2de5107b41b868e9ee2f6
+---
+ build/dependencies/dependencies.properties | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/build/dependencies/dependencies.properties b/build/dependencies/dependencies.properties
+index 5d9f9935c27b..a4b62a682fc5 100644
+--- a/build/dependencies/dependencies.properties
++++ b/build/dependencies/dependencies.properties
+@@ -7,6 +7,6 @@ jdkBuild=21.0.10b1163.108
+ launcherBuild=261.19843
+ nsisBuild=3.11-1
+ restarterBuild=243.6005
+-runtimeBuild=25.0.2b329.117
++runtimeBuild=25.0.2b329.123
+ snapDockerImage=registry.jetbrains.team/p/ij/docker-hub/jetbrains/snapcraft@sha256:0059496b7a941e27937bc523621a336bddc1327de8dcd03f6b0bd0b57892ce43
+ toolboxBuild=3.2.0.65851
+-- 
+2.53.0
+

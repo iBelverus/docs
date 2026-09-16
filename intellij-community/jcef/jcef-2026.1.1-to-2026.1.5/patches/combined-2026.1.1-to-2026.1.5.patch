@@ -1,14 +1,30 @@
 # Combined JCEF/CEF changes: idea/2026.1.1 -> idea/2026.1.5
 # Source: JetBrains/intellij-community
-# Net diff of JCEF/CEF-related paths between the two tags:
-#   git diff idea/2026.1.1 idea/2026.1.5 -- <jcef/cef paths>
+# Net diff of JCEF/CEF-related paths plus the JBR (runtimeBuild) dependency between the two tags:
+#   git diff idea/2026.1.1 idea/2026.1.5 -- <jcef/cef paths> build/dependencies/dependencies.properties
 # Composed from commits (chronological):
 #   f07d1eb593804432c219fb0324b2f24dfc948411 2026-04-19 Artem Bochkarev | IJPL-242830 Check whether CEF version was updated
+#   21e28680d4a335802ed47d81dce8277081ed7935 2026-04-21 runtime-promotion-bot-noreply | IJI-3336 Updating versions of project dependencies: runtimeBuild->25.0.2b329.117
 #   5b9a22f3d582e5eeebc192765babcb26d8bb7893 2026-04-27 Artem Bochkarev | IJPL-242830 Clear jcef caches in OSX for version 2026.1.2
+#   2c3a1abc3bb72123c6e8ccc7164a9af90d4c804f 2026-04-29 runtime-promotion-bot-noreply | IJI-3336 Updating versions of project dependencies: runtimeBuild->25.0.2b329.123
 #   71cb2829f107e0898f3ee2c9edef510945aca7cc 2026-05-07 Ilia Permiashkin | [markdown] IJPL-171896 Markdown preview doesn't render images from outside the project
+#   05dfc9c5f742cf092538f4c8e74f3e3d8b2f8105 2026-05-09 runtime-promotion-bot-noreply | IJI-3336 Updating versions of project dependencies: runtimeBuild->25.0.3b329.124
+#   239e49921edf2263495ce2fcd96a01e58d225f72 2026-08-03 runtime-promotion-bot-noreply | IJI-3336 Updating versions of project dependencies: runtimeBuild->25.0.4b329.128
 #
 # Apply with: git apply combined-2026.1.1-to-2026.1.5.patch
 #
+diff --git a/build/dependencies/dependencies.properties b/build/dependencies/dependencies.properties
+index 5d9f9935c27b..74aac9feef7a 100644
+--- a/build/dependencies/dependencies.properties
++++ b/build/dependencies/dependencies.properties
+@@ -7,6 +7,6 @@ jdkBuild=21.0.10b1163.108
+ launcherBuild=261.19843
+ nsisBuild=3.11-1
+ restarterBuild=243.6005
+-runtimeBuild=25.0.2b329.117
++runtimeBuild=25.0.4b329.128
+ snapDockerImage=registry.jetbrains.team/p/ij/docker-hub/jetbrains/snapcraft@sha256:0059496b7a941e27937bc523621a336bddc1327de8dcd03f6b0bd0b57892ce43
+ toolboxBuild=3.2.0.65851
 diff --git a/platform/platform-api/resources/messages/IdeBundle.properties b/platform/platform-api/resources/messages/IdeBundle.properties
 index 780ee16bc28f..d80def1effb7 100644
 --- a/platform/platform-api/resources/messages/IdeBundle.properties
