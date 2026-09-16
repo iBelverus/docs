@@ -57,11 +57,27 @@ Relevant observations in this range:
   `f71f3c90ddde` (macOS in-process startup from JBR bundle),
   `d7d8ffb3698a` (AboutDialog JCEF version format),
   `d0ce76efee44` (native-bundle-provider priority).
-- Generic JBR *version* updates are **not** JCEF/CEF changes and are excluded:
-  `libraries/jbr/module-content.yaml` is unchanged (`jbr-api-1.jar` in both
-  tags), and `jdkBuild`/`runtimeBuild` (JBR 25.0.x), the "switch compilation JDK
-  to JBR 25" commit, the standard/lightweight JBR flavour merge, and
-  JBRResolver/installer work are all unrelated to JCEF.
+- Generic JBR *version* updates are **not** JCEF/CEF changes: the `runtimeBuild`
+  (JBR 25.0.x) and `jdkBuild` (compilation JDK) promotions, the standard/
+  lightweight JBR flavour merge, and JBRResolver/installer work are all unrelated
+  to JCEF. These are documented separately in the "JetBrains Runtime (JBR)
+  update" section below.
+
+## JetBrains Runtime (JBR) update
+
+The bundled JetBrains Runtime dependency was promoted across the range
+(`build/dependencies/dependencies.properties`):
+
+| Property | 2026.1.5 | 2026.2.2 | Change |
+|----------|----------|----------|--------|
+| `runtimeBuild` (JBR) | `25.0.4b329.128` | `25.0.4b508.27` | ~24 `runtime-promotion-bot-noreply` commits (IJI-3336), incl. one revert |
+| `jdkBuild` (compiler JDK) | `21.0.10b1163.108` | `25.0.2b410.29` | `aa1cfa9632ab` IJPL-221307 "switch compilation JDK to JBR 25" |
+
+**Relationship to JCEF/CEF:** these JBR promotions carry **no CEF version
+change** — the CEF 137→144 transition is tracked independently via
+`jcefBuild=262-b37` (see Theme 1). `libraries/jbr/module-content.yaml` is
+unchanged (`jbr-api-1.jar` in both tags). The JCEF↔JBR bridge commits remain the
+three Theme 3 entries (`f71f3c90ddde`, `d7d8ffb3698a`, `d0ce76efee44`).
 
 ## Summary
 
@@ -201,7 +217,7 @@ Python packaging tool-window change that only incidentally touches
   (`2ec83dbdeb68`, `1469dc64e8b5`, `943d105cc0d5`), and the JPMS library-wrapper
   commits (`338be7036ffa` / `1f3e0d270ba9`) touch `jcef` build files but contain
   no JCEF logic.
-- **Generic JBR/runtime updates** (see the JBR section above).
+- **Generic JBR/runtime updates** (see the "JetBrains Runtime (JBR) update" section).
 
 ## Risk / Impact Assessment
 
@@ -221,6 +237,10 @@ Python packaging tool-window change that only incidentally touches
 - **Themes 4 & 5** are localized consumer fixes with limited blast radius, though
   the Markdown security hardening (`87fba5d14334`, `8a5f6071a159`) intentionally
   restricts what untrusted content can do and could affect legitimate use cases.
+- **JBR update** (`runtimeBuild` 25.0.4 patch promotions, `jdkBuild` 21 → 25)
+  carries no CEF change and is low JCEF-specific risk; the JBR promotions and the
+  JBR 25 compiler-JDK switch can introduce unrelated runtime/build behavior
+  changes.
 
 ## Artifacts
 
@@ -229,4 +249,5 @@ Python packaging tool-window change that only incidentally touches
 - `patches/0003-platform-jcef-runtime-fixes.patch`
 - `patches/0004-markdown-jcef-preview.patch`
 - `patches/0005-jupyter-python-cef-consumers.patch`
+- `patches/0006-jbr-runtimebuild-update.patch`
 - `patches/combined-2026.1.5-to-2026.2.2.patch`

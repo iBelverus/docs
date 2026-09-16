@@ -1,7 +1,8 @@
 # Combined JCEF/CEF changes: idea/2026.1.5 -> idea/2026.2.2
 # Source: JetBrains/intellij-community
-# Net diff of JCEF/CEF-related paths between the two tags:
+# Net diff of JCEF/CEF-related paths plus the JBR (jdkBuild + runtimeBuild) dependency lines:
 #   git diff idea/2026.1.5 idea/2026.2.2 -- <jcef/cef paths>
+#   + JBR lines from build/dependencies/dependencies.properties (see 0006-jbr-runtimebuild-update.patch)
 # Composed from commits (chronological):
 #   e79a28c88a0a6f7c8cc34496d4bc1aa0373270a7 2026-02-11 Yuriy Artamonov | [jcef] IJPL-203516 Build JCEF plugin with native bundles
 #   706518f3193f341c2498852bc7836f51d978c66a 2026-02-11 Yuriy Artamonov | [jcef] IJPL-203516 Update product layouts
@@ -48,6 +49,8 @@
 #   e2a6d9082df263b65bd92f5a4f24bc63a709307e 2026-08-03 Ilia Permiashkin | [markdown] IJPL-250785 Markdown editor: High CPU from run-configuration lookups per code span
 #   a1136dd7a9a4bb2b2d2890d48083a330f39a38d0 2026-08-06 Nikita Pavlenko | [PyCharm] WhatsNew (feat): WhatsNew Vision and Legacy modes, switching and disabling reworked. #PY-91405 Ready For Merge
 #   caef43e423f00a4398f25d5f6de09db0abde499c 2026-08-17 Ekaterina Berezhko | [Markdown][IJPL-251259] Adapt scrollbar styling to IDE scale
+#
+# JBR updates: runtimeBuild promoted ~24x (IJI-3336), jdkBuild switched to JBR 25 (aa1cfa9632ab, IJPL-221307).
 #
 # Apply with: git apply combined-2026.1.5-to-2026.2.2.patch
 #
@@ -16708,3 +16711,21 @@ index 1839e0bfe745..989e3b6ccfbe 100644
  
    override fun setHtml(html: String) {
      myLastHtml = html
+
+diff --git a/build/dependencies/dependencies.properties b/build/dependencies/dependencies.properties
+index 74aac9feef7a827d518db6ff4fa7c359fbc4274d..bb6a08b2e01afa88ff9559c5913de766158e28a8 100644
+--- a/build/dependencies/dependencies.properties
++++ b/build/dependencies/dependencies.properties
+@@ -3,10 +3,10 @@ bundledMavenVersion=3.9.11
+ debuggerAgent=1.2
+ gradleApiVersion=9.3.0
+ gradleTAPI.jacksonCoreVersion=2.17.2
+-jdkBuild=21.0.10b1163.108
++jdkBuild=25.0.2b410.29
+ launcherBuild=261.19843
+ nsisBuild=3.11-1
+ restarterBuild=243.6005
+-runtimeBuild=25.0.4b329.128
++runtimeBuild=25.0.4b508.27
+ snapDockerImage=registry.jetbrains.team/p/ij/docker-hub/jetbrains/snapcraft@sha256:0059496b7a941e27937bc523621a336bddc1327de8dcd03f6b0bd0b57892ce43
+ toolboxBuild=3.2.0.65851

@@ -31,6 +31,7 @@ intellij-community/
             ├── 0003-platform-jcef-runtime-fixes.patch
             ├── 0004-markdown-jcef-preview.patch
             ├── 0005-jupyter-python-cef-consumers.patch
+            ├── 0006-jbr-runtimebuild-update.patch
             └── combined-2026.1.5-to-2026.2.2.patch
 ```
 

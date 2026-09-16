@@ -1,0 +1,30 @@
+# JCEF/CEF changes: JetBrains Runtime (JBR) update (jdkBuild + runtimeBuild)
+# Source: JetBrains/intellij-community  (range idea/2026.1.5..idea/2026.2.2)
+# Net diff of the JBR-related lines in build/dependencies/dependencies.properties:
+#   - runtimeBuild: 25.0.4b329.128 -> 25.0.4b508.27 (JBR 25.0.4 patch promotions,
+#     ~24 IJI-3336 runtime-promotion-bot-noreply commits)
+#   - jdkBuild:     21.0.10b1163.108 -> 25.0.2b410.29 (IJPL-221307 switch
+#     compilation JDK to JBR 25, commit aa1cfa9632ab)
+# These JBR bumps carry no CEF version change; the CEF 137->144 transition is
+# tracked independently via jcefBuild=262-b37 (see Theme 1).
+#
+# Reference: grouped patch for review; the same lines are included in
+# combined-2026.1.5-to-2026.2.2.patch.
+#
+diff --git a/build/dependencies/dependencies.properties b/build/dependencies/dependencies.properties
+index 74aac9feef7a827d518db6ff4fa7c359fbc4274d..bb6a08b2e01afa88ff9559c5913de766158e28a8 100644
+--- a/build/dependencies/dependencies.properties
++++ b/build/dependencies/dependencies.properties
+@@ -3,10 +3,10 @@ bundledMavenVersion=3.9.11
+ debuggerAgent=1.2
+ gradleApiVersion=9.3.0
+ gradleTAPI.jacksonCoreVersion=2.17.2
+-jdkBuild=21.0.10b1163.108
++jdkBuild=25.0.2b410.29
+ launcherBuild=261.19843
+ nsisBuild=3.11-1
+ restarterBuild=243.6005
+-runtimeBuild=25.0.4b329.128
++runtimeBuild=25.0.4b508.27
+ snapDockerImage=registry.jetbrains.team/p/ij/docker-hub/jetbrains/snapcraft@sha256:0059496b7a941e27937bc523621a336bddc1327de8dcd03f6b0bd0b57892ce43
+ toolboxBuild=3.2.0.65851
